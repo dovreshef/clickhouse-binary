@@ -89,11 +89,11 @@ let schema = Schema::from_type_strings(&[("value", "Dynamic")])?;
 let mut writer = RowBinaryWriter::new(Vec::new(), RowBinaryFormat::RowBinary, schema);
 writer.write_rows(&[
     vec![Value::Dynamic {
-        ty: TypeDesc::UInt8,
+        ty: Box::new(TypeDesc::UInt8),
         value: Box::new(Value::UInt8(7)),
     }],
     vec![Value::Dynamic {
-        ty: TypeDesc::String,
+        ty: Box::new(TypeDesc::String),
         value: Box::new(Value::String(b"alpha".to_vec())),
     }],
     vec![Value::DynamicNull],

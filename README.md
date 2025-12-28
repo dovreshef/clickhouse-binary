@@ -29,7 +29,7 @@ let payload = writer.into_inner();
 For `RowBinaryWithNames` and `RowBinaryWithNamesAndTypes`, the header is written
 automatically from the schema.
 
-See `usage.md` for end-to-end streaming examples (compressed files, batching,
+See `USAGE.md` for end-to-end streaming examples (compressed files, batching,
 and multi-threaded producers).
 
 ## Supported Types
@@ -41,7 +41,7 @@ Currently supported:
 - `Date`, `Date32`, `DateTime`, `DateTime64`.
 - `UUID`, `IPv4`, `IPv6`.
 - `Nullable(T)`, `Array(T)`, `Map(K, V)`, `LowCardinality(T)`.
-- `Tuple(...)`, `Nested(...)`, `Dynamic`.
+- `Tuple(...)`, `Nested(...)`, `Dynamic`, `JSON`.
 
 Validation mirrors ClickHouse rules where applicable:
 - `LowCardinality` is only allowed for types ClickHouse accepts (numbers, string
@@ -49,7 +49,7 @@ Validation mirrors ClickHouse rules where applicable:
   those). `LowCardinality(DateTime64)` and nested low-cardinality are rejected.
 - `Map` keys cannot be `Nullable` or `LowCardinality(Nullable(...))`.
 
-JSON v3 RowBinary encodings are planned but not implemented yet.
+JSON v3 RowBinary encodings are supported (binary path/value form).
 
 Dynamic values embed the concrete type inline using ClickHouse binary type
 encoding; use `Value::Dynamic`/`Value::DynamicNull` when writing.

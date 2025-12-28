@@ -2,7 +2,7 @@
 
 use std::io::Read;
 
-use clickhouse_binary::{Row, RowBinaryFormat, RowBinaryReader, RowBinaryWriter, Schema};
+use clickhouse_binary::{Row, RowBinaryFormat, RowBinaryReader, RowBinaryWriter, Schema, Value};
 use rand::{Rng, distr::Alphanumeric, rng};
 use serde_json::Value as JsonValue;
 use ureq::{Agent, Body, Error as UreqError, config::Config, http::Response as HttpResponse};
@@ -174,6 +174,15 @@ pub fn decode_rows(payload: &[u8], format: RowBinaryFormat, schema: &Schema) -> 
         rows.push(row);
     }
     rows
+}
+
+/// Sorts JSON object entries by path for stable comparisons.
+pub fn normalize_json_rows(rows: &mut [Row], json_index: usize) {
+    for row in rows {
+        if let Some(Value::JsonObject(entries)) = row.get_mut(json_index) {
+            entries.sort_by(|a, b| a.0.cmp(&b.0));
+        }
+    }
 }
 
 /// Formats a scaled integer as a decimal string with the given scale.

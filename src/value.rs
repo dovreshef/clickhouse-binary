@@ -77,10 +77,12 @@ pub enum Value {
     Map(Vec<(Value, Value)>),
     /// Tuple represented as ordered values.
     Tuple(Vec<Value>),
+    /// JSON object represented as ordered path/value pairs.
+    JsonObject(Vec<(String, Value)>),
     /// Dynamic value with an explicit runtime type.
     Dynamic {
         /// The concrete type encoded for this value.
-        ty: TypeDesc,
+        ty: Box<TypeDesc>,
         /// The concrete value payload.
         value: Box<Value>,
     },
@@ -127,6 +129,7 @@ impl Value {
             Value::Array(_) => "Array",
             Value::Map(_) => "Map",
             Value::Tuple(_) => "Tuple",
+            Value::JsonObject(_) => "JSON",
             Value::Dynamic { .. } | Value::DynamicNull => "Dynamic",
         }
     }

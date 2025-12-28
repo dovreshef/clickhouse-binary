@@ -14,6 +14,9 @@ const DECIMAL32_MAX_PRECISION: u8 = 9;
 const DECIMAL64_MAX_PRECISION: u8 = 18;
 const DECIMAL128_MAX_PRECISION: u8 = 38;
 const DECIMAL256_MAX_PRECISION: u8 = 76;
+const JSON_SERIALIZATION_VERSION: u8 = 0;
+const JSON_MAX_TYPED_PATHS: usize = 1000;
+const JSON_MAX_DYNAMIC_PATHS_LIMIT: usize = 10000;
 
 #[repr(u8)]
 enum BinaryTypeIndex {
@@ -58,6 +61,7 @@ enum BinaryTypeIndex {
     Dynamic = 0x2B,
     Bool = 0x2D,
     Nested = 0x2F,
+    Json = 0x30,
 }
 
 #[allow(clippy::too_many_lines)]
@@ -198,6 +202,38 @@ pub(crate) fn encode_type_binary<W: Write + ?Sized>(ty: &TypeDesc, writer: &mut 
             }
             write_tag(BinaryTypeIndex::LowCardinality, writer)?;
             encode_type_binary(inner, writer)
+        }
+        TypeDesc::Json {
+            max_dynamic_paths,
+            max_dynamic_types,
+            typed_paths,
+            skip_paths,
+            skip_regexps,
+        } => {
+            if *max_dynamic_paths > JSON_MAX_DYNAMIC_PATHS_LIMIT {
+                return Err(Error::InvalidValue("JSON max_dynamic_paths too large"));
+            }
+            write_tag(BinaryTypeIndex::Json, writer)?;
+            writer.write_all(&[JSON_SERIALIZATION_VERSION])?;
+            write_uvarint(*max_dynamic_paths as u64, writer)?;
+            writer.write_all(&[*max_dynamic_types])?;
+            if typed_paths.len() > JSON_MAX_TYPED_PATHS {
+                return Err(Error::InvalidValue("too many JSON typed paths"));
+            }
+            write_uvarint(typed_paths.len() as u64, writer)?;
+            for (path, ty) in typed_paths {
+                write_string(path, writer)?;
+                encode_type_binary(ty, writer)?;
+            }
+            write_uvarint(skip_paths.len() as u64, writer)?;
+            for path in skip_paths {
+                write_string(path, writer)?;
+            }
+            write_uvarint(skip_regexps.len() as u64, writer)?;
+            for regex in skip_regexps {
+                write_string(regex, writer)?;
+            }
+            Ok(())
         }
         TypeDesc::Dynamic { .. } => Err(Error::UnsupportedType("Dynamic".into())),
     }
@@ -471,6 +507,58 @@ fn decode_type_binary_inner_with_tag<R: Read + ?Sized>(
             }
             Ok(Some(TypeDesc::Nested(items)))
         }
+        x if x == BinaryTypeIndex::Json as u8 => {
+            let version = read_u8(reader)?;
+            if version > JSON_SERIALIZATION_VERSION {
+                return Err(Error::InvalidValue("unexpected JSON serialization version"));
+            }
+            let max_dynamic_paths =
+                read_required_uvarint(reader, "missing JSON max_dynamic_paths")?;
+            let max_dynamic_paths = usize::try_from(max_dynamic_paths)
+                .map_err(|_| Error::Overflow("JSON max_dynamic_paths too large"))?;
+            if max_dynamic_paths > JSON_MAX_DYNAMIC_PATHS_LIMIT {
+                return Err(Error::InvalidValue("JSON max_dynamic_paths too large"));
+            }
+            let max_dynamic_types = read_u8(reader)?;
+            let typed_paths_count = read_required_uvarint(reader, "missing JSON typed path count")?;
+            let typed_paths_count = usize::try_from(typed_paths_count)
+                .map_err(|_| Error::Overflow("JSON typed path count too large"))?;
+            if typed_paths_count > JSON_MAX_TYPED_PATHS {
+                return Err(Error::InvalidValue("too many JSON typed paths"));
+            }
+            let mut typed_paths = Vec::with_capacity(typed_paths_count);
+            for _ in 0..typed_paths_count {
+                let path = read_required_string(reader, "missing JSON typed path")?;
+                let ty = decode_type_binary_inner(reader, complexity)?.ok_or_else(|| {
+                    Error::UnsupportedCombination("JSON typed path cannot be Nothing".into())
+                })?;
+                typed_paths.push((path, ty));
+            }
+            let skip_paths_count = read_required_uvarint(reader, "missing JSON skip paths count")?;
+            let skip_paths_count = usize::try_from(skip_paths_count)
+                .map_err(|_| Error::Overflow("JSON skip path count too large"))?;
+            let mut skip_paths = Vec::with_capacity(skip_paths_count);
+            for _ in 0..skip_paths_count {
+                let path = read_required_string(reader, "missing JSON skip path")?;
+                skip_paths.push(path);
+            }
+            let skip_regexps_count =
+                read_required_uvarint(reader, "missing JSON skip regexps count")?;
+            let skip_regexps_count = usize::try_from(skip_regexps_count)
+                .map_err(|_| Error::Overflow("JSON skip regexp count too large"))?;
+            let mut skip_regexps = Vec::with_capacity(skip_regexps_count);
+            for _ in 0..skip_regexps_count {
+                let regex = read_required_string(reader, "missing JSON skip regexp")?;
+                skip_regexps.push(regex);
+            }
+            Ok(Some(TypeDesc::Json {
+                max_dynamic_paths,
+                max_dynamic_types,
+                typed_paths,
+                skip_paths,
+                skip_regexps,
+            }))
+        }
         x if x == BinaryTypeIndex::Dynamic as u8 => Err(Error::UnsupportedType("Dynamic".into())),
         other => Err(Error::UnsupportedType(format!("binary type 0x{other:02x}"))),
     }
@@ -706,6 +794,13 @@ mod tests {
             TypeDesc::Tuple(tuple_items.clone()),
             TypeDesc::Tuple(named_tuple_items.clone()),
             TypeDesc::Nested(named_tuple_items),
+            TypeDesc::Json {
+                max_dynamic_paths: 10,
+                max_dynamic_types: 4,
+                typed_paths: vec![("a".to_string(), TypeDesc::UInt8)],
+                skip_paths: vec!["b".to_string()],
+                skip_regexps: vec!["^c".to_string()],
+            },
         ];
 
         for ty in types {

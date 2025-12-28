@@ -3,7 +3,7 @@ use std::net::{Ipv4Addr, Ipv6Addr};
 use clickhouse_binary::{Row, RowBinaryFormat, Schema, TypeDesc, Value};
 use uuid::Uuid;
 
-use crate::common::{ClickhouseServer, decode_rows, unique_table};
+use crate::common::{ClickhouseServer, decode_rows, normalize_json_rows, unique_table};
 
 const FORMATS: [RowBinaryFormat; 3] = [
     RowBinaryFormat::RowBinary,
@@ -107,7 +107,7 @@ fn mixed_dynamic_rows() -> (Row, Row, Row) {
     let first = vec![
         Value::UInt64(1),
         Value::Dynamic {
-            ty: TypeDesc::UInt8,
+            ty: Box::new(TypeDesc::UInt8),
             value: Box::new(Value::UInt8(7)),
         },
         Value::String(b"alpha".to_vec()),
@@ -115,7 +115,7 @@ fn mixed_dynamic_rows() -> (Row, Row, Row) {
     let second = vec![
         Value::UInt64(2),
         Value::Dynamic {
-            ty: TypeDesc::String,
+            ty: Box::new(TypeDesc::String),
             value: Box::new(Value::String(b"beta".to_vec())),
         },
         Value::String(b"gamma".to_vec()),
@@ -132,6 +132,80 @@ fn create_mixed_dynamic_table(server: &ClickhouseServer, table: &str) {
     server.exec(&format!("DROP TABLE IF EXISTS {table}"));
     server.exec(&format!(
         "CREATE TABLE {table} (id UInt64, value Dynamic, note String) ENGINE=Memory"
+    ));
+}
+
+fn mixed_json_schema() -> Schema {
+    Schema::from_type_strings(&[
+        ("id", "UInt64"),
+        ("payload", "JSON(a UInt32, tags Array(String))"),
+        ("labels", "Array(String)"),
+        ("attrs", "Map(String, UInt16)"),
+        ("pair", "Tuple(UInt8, String)"),
+    ])
+    .unwrap()
+}
+
+fn mixed_json_rows() -> (Row, Row) {
+    let first = vec![
+        Value::UInt64(1),
+        Value::JsonObject(vec![
+            ("a".to_string(), Value::UInt32(7)),
+            (
+                "tags".to_string(),
+                Value::Array(vec![
+                    Value::String(b"red".to_vec()),
+                    Value::String(b"blue".to_vec()),
+                ]),
+            ),
+            (
+                "meta".to_string(),
+                Value::Dynamic {
+                    ty: Box::new(TypeDesc::Map {
+                        key: Box::new(TypeDesc::String),
+                        value: Box::new(TypeDesc::UInt16),
+                    }),
+                    value: Box::new(Value::Map(vec![(
+                        Value::String(b"x".to_vec()),
+                        Value::UInt16(1),
+                    )])),
+                },
+            ),
+        ]),
+        Value::Array(vec![Value::String(b"one".to_vec())]),
+        Value::Map(vec![(Value::String(b"left".to_vec()), Value::UInt16(10))]),
+        Value::Tuple(vec![Value::UInt8(9), Value::String(b"ok".to_vec())]),
+    ];
+    let second = vec![
+        Value::UInt64(2),
+        Value::JsonObject(vec![
+            ("a".to_string(), Value::UInt32(42)),
+            ("tags".to_string(), Value::Array(Vec::new())),
+            (
+                "note".to_string(),
+                Value::Dynamic {
+                    ty: Box::new(TypeDesc::String),
+                    value: Box::new(Value::String(b"hi".to_vec())),
+                },
+            ),
+        ]),
+        Value::Array(Vec::new()),
+        Value::Map(Vec::new()),
+        Value::Tuple(vec![Value::UInt8(1), Value::String(b"yo".to_vec())]),
+    ];
+    (first, second)
+}
+
+fn create_mixed_json_table(server: &ClickhouseServer, table: &str) {
+    server.exec(&format!("DROP TABLE IF EXISTS {table}"));
+    server.exec(&format!(
+        "CREATE TABLE {table} (\
+         id UInt64,\
+         payload JSON(a UInt32, tags Array(String)),\
+         labels Array(String),\
+         attrs Map(String, UInt16),\
+         pair Tuple(UInt8, String)\
+         ) ENGINE=Memory"
     ));
 }
 
@@ -233,6 +307,109 @@ fn mixed_dynamic_schema_reading() {
         let payload = server.fetch_rowbinary(&format!("SELECT * FROM {table}"), format);
         let decoded = decode_rows(&payload, format, &schema);
         assert_eq!(decoded, vec![first.clone(), second.clone(), third.clone()]);
+    }
+}
+
+#[test]
+fn mixed_json_schema_single_row_reading() {
+    let server = ClickhouseServer::connect();
+    let table = unique_table("");
+    create_mixed_json_table(&server, &table);
+    let schema = mixed_json_schema();
+    let (first, _) = mixed_json_rows();
+    let insert_sql = format!(
+        "INSERT INTO {table} FORMAT {}",
+        RowBinaryFormat::RowBinaryWithNamesAndTypes
+    );
+    server.insert_rowbinary(
+        &insert_sql,
+        RowBinaryFormat::RowBinaryWithNamesAndTypes,
+        &schema,
+        std::slice::from_ref(&first),
+    );
+
+    for format in FORMATS {
+        let payload = server.fetch_rowbinary(&format!("SELECT * FROM {table}"), format);
+        let mut decoded = decode_rows(&payload, format, &schema);
+        let mut expected = vec![first.clone()];
+        normalize_json_rows(&mut decoded, 1);
+        normalize_json_rows(&mut expected, 1);
+        assert_eq!(decoded, expected);
+    }
+}
+
+#[test]
+fn mixed_json_schema_multi_row_reading() {
+    let server = ClickhouseServer::connect();
+    let table = unique_table("");
+    create_mixed_json_table(&server, &table);
+    let schema = mixed_json_schema();
+    let (first, second) = mixed_json_rows();
+    let insert_sql = format!(
+        "INSERT INTO {table} FORMAT {}",
+        RowBinaryFormat::RowBinaryWithNamesAndTypes
+    );
+    server.insert_rowbinary(
+        &insert_sql,
+        RowBinaryFormat::RowBinaryWithNamesAndTypes,
+        &schema,
+        &[first.clone(), second.clone()],
+    );
+
+    for format in FORMATS {
+        let payload = server.fetch_rowbinary(&format!("SELECT * FROM {table}"), format);
+        let mut decoded = decode_rows(&payload, format, &schema);
+        let mut expected = vec![first.clone(), second.clone()];
+        normalize_json_rows(&mut decoded, 1);
+        normalize_json_rows(&mut expected, 1);
+        assert_eq!(decoded, expected);
+    }
+}
+
+#[test]
+fn mixed_json_schema_single_row_writing() {
+    let server = ClickhouseServer::connect();
+    let table = unique_table("");
+    create_mixed_json_table(&server, &table);
+    let schema = mixed_json_schema();
+    let (first, _) = mixed_json_rows();
+
+    for format in FORMATS {
+        let insert_sql = format!("INSERT INTO {table} FORMAT {format}");
+        server.insert_rowbinary(&insert_sql, format, &schema, std::slice::from_ref(&first));
+        let payload = server.fetch_rowbinary(&format!("SELECT * FROM {table}"), format);
+        let mut decoded = decode_rows(&payload, format, &schema);
+        let mut expected = vec![first.clone()];
+        normalize_json_rows(&mut decoded, 1);
+        normalize_json_rows(&mut expected, 1);
+        assert_eq!(decoded, expected);
+        server.exec(&format!("TRUNCATE TABLE {table}"));
+    }
+}
+
+#[test]
+fn mixed_json_schema_multi_row_writing() {
+    let server = ClickhouseServer::connect();
+    let table = unique_table("");
+    create_mixed_json_table(&server, &table);
+    let schema = mixed_json_schema();
+    let (first, second) = mixed_json_rows();
+
+    for format in FORMATS {
+        let insert_sql = format!("INSERT INTO {table} FORMAT {format}");
+        server.insert_rowbinary(
+            &insert_sql,
+            format,
+            &schema,
+            &[first.clone(), second.clone()],
+        );
+        let payload = server.fetch_rowbinary(&format!("SELECT * FROM {table}"), format);
+        let mut decoded = decode_rows(&payload, format, &schema);
+        let mut expected = vec![first.clone(), second.clone()];
+        normalize_json_rows(&mut decoded, 1);
+        normalize_json_rows(&mut expected, 1);
+        assert_eq!(decoded, expected);
+        server.exec(&format!("TRUNCATE TABLE {table}"));
     }
 }
 

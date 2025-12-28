@@ -28,7 +28,7 @@ fn dynamic_single_row_reading() {
         assert_eq!(
             decoded,
             vec![vec![Value::Dynamic {
-                ty: TypeDesc::UInt8,
+                ty: Box::new(TypeDesc::UInt8),
                 value: Box::new(Value::UInt8(7)),
             }]]
         );
@@ -58,15 +58,15 @@ fn dynamic_multi_row_reading() {
             decoded,
             vec![
                 vec![Value::Dynamic {
-                    ty: TypeDesc::UInt8,
+                    ty: Box::new(TypeDesc::UInt8),
                     value: Box::new(Value::UInt8(7)),
                 }],
                 vec![Value::Dynamic {
-                    ty: TypeDesc::String,
+                    ty: Box::new(TypeDesc::String),
                     value: Box::new(Value::String(b"alpha".to_vec())),
                 }],
                 vec![Value::Dynamic {
-                    ty: TypeDesc::Array(Box::new(TypeDesc::UInt8)),
+                    ty: Box::new(TypeDesc::Array(Box::new(TypeDesc::UInt8))),
                     value: Box::new(Value::Array(vec![
                         Value::UInt8(1),
                         Value::UInt8(2),
@@ -113,7 +113,7 @@ fn dynamic_single_row_writing() {
             format,
             &schema,
             &[vec![Value::Dynamic {
-                ty: TypeDesc::UInt8,
+                ty: Box::new(TypeDesc::UInt8),
                 value: Box::new(Value::UInt8(7)),
             }]],
         );
@@ -141,16 +141,16 @@ fn dynamic_multi_row_writing() {
             &schema,
             &[
                 vec![Value::Dynamic {
-                    ty: TypeDesc::UInt8,
+                    ty: Box::new(TypeDesc::UInt8),
                     value: Box::new(Value::UInt8(7)),
                 }],
                 vec![Value::Dynamic {
-                    ty: TypeDesc::String,
+                    ty: Box::new(TypeDesc::String),
                     value: Box::new(Value::String(b"alpha".to_vec())),
                 }],
                 vec![Value::DynamicNull],
                 vec![Value::Dynamic {
-                    ty: TypeDesc::Array(Box::new(TypeDesc::UInt8)),
+                    ty: Box::new(TypeDesc::Array(Box::new(TypeDesc::UInt8))),
                     value: Box::new(Value::Array(vec![Value::UInt8(1), Value::UInt8(2)])),
                 }],
             ],
@@ -172,7 +172,7 @@ fn dynamic_multi_row_writing() {
 #[test]
 fn dynamic_rejects_unsupported_type_encoding() {
     let schema = Schema::from_type_strings(&[("value", "Dynamic")]).unwrap();
-    let payload = [0x30_u8];
+    let payload = [0x31_u8];
     let mut reader = RowBinaryReader::with_schema(&payload[..], RowBinaryFormat::RowBinary, schema);
     let err = reader.read_row().unwrap_err();
     assert!(matches!(err, Error::UnsupportedType(_)));
@@ -195,7 +195,7 @@ fn dynamic_composite_multi_row_reading() {
     let schema = Schema::from_type_strings(&[("value", "Dynamic")]).unwrap();
     let expected = vec![
         vec![Value::Dynamic {
-            ty: TypeDesc::Tuple(vec![
+            ty: Box::new(TypeDesc::Tuple(vec![
                 TupleItem {
                     name: None,
                     ty: TypeDesc::UInt8,
@@ -204,24 +204,24 @@ fn dynamic_composite_multi_row_reading() {
                     name: None,
                     ty: TypeDesc::String,
                 },
-            ]),
+            ])),
             value: Box::new(Value::Tuple(vec![
                 Value::UInt8(7),
                 Value::String(b"alpha".to_vec()),
             ])),
         }],
         vec![Value::Dynamic {
-            ty: TypeDesc::Map {
+            ty: Box::new(TypeDesc::Map {
                 key: Box::new(TypeDesc::String),
                 value: Box::new(TypeDesc::UInt8),
-            },
+            }),
             value: Box::new(Value::Map(vec![
                 (Value::String(b"a".to_vec()), Value::UInt8(1)),
                 (Value::String(b"b".to_vec()), Value::UInt8(2)),
             ])),
         }],
         vec![Value::Dynamic {
-            ty: TypeDesc::Array(Box::new(TypeDesc::Tuple(vec![
+            ty: Box::new(TypeDesc::Array(Box::new(TypeDesc::Tuple(vec![
                 TupleItem {
                     name: None,
                     ty: TypeDesc::UInt8,
@@ -230,7 +230,7 @@ fn dynamic_composite_multi_row_reading() {
                     name: None,
                     ty: TypeDesc::String,
                 },
-            ]))),
+            ])))),
             value: Box::new(Value::Array(vec![
                 Value::Tuple(vec![Value::UInt8(1), Value::String(b"x".to_vec())]),
                 Value::Tuple(vec![Value::UInt8(2), Value::String(b"y".to_vec())]),
@@ -256,7 +256,7 @@ fn dynamic_composite_multi_row_writing() {
     let schema = Schema::from_type_strings(&[("value", "Dynamic")]).unwrap();
     let rows = vec![
         vec![Value::Dynamic {
-            ty: TypeDesc::Tuple(vec![
+            ty: Box::new(TypeDesc::Tuple(vec![
                 TupleItem {
                     name: None,
                     ty: TypeDesc::UInt8,
@@ -265,33 +265,33 @@ fn dynamic_composite_multi_row_writing() {
                     name: None,
                     ty: TypeDesc::String,
                 },
-            ]),
+            ])),
             value: Box::new(Value::Tuple(vec![
                 Value::UInt8(7),
                 Value::String(b"alpha".to_vec()),
             ])),
         }],
         vec![Value::Dynamic {
-            ty: TypeDesc::Map {
+            ty: Box::new(TypeDesc::Map {
                 key: Box::new(TypeDesc::String),
                 value: Box::new(TypeDesc::UInt8),
-            },
+            }),
             value: Box::new(Value::Map(vec![
                 (Value::String(b"a".to_vec()), Value::UInt8(1)),
                 (Value::String(b"b".to_vec()), Value::UInt8(2)),
             ])),
         }],
         vec![Value::Dynamic {
-            ty: TypeDesc::Nested(vec![
+            ty: Box::new(TypeDesc::Array(Box::new(TypeDesc::Tuple(vec![
                 TupleItem {
-                    name: Some("a".to_string()),
+                    name: None,
                     ty: TypeDesc::UInt8,
                 },
                 TupleItem {
-                    name: Some("b".to_string()),
+                    name: None,
                     ty: TypeDesc::String,
                 },
-            ]),
+            ])))),
             value: Box::new(Value::Array(vec![
                 Value::Tuple(vec![Value::UInt8(1), Value::String(b"x".to_vec())]),
                 Value::Tuple(vec![Value::UInt8(2), Value::String(b"y".to_vec())]),

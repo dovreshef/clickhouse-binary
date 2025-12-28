@@ -9,7 +9,7 @@ use uuid::Uuid;
 
 use crate::{
     error::{Error, Result},
-    io::{read_bytes, read_uvarint, write_bytes, write_uvarint},
+    io::{read_bytes, read_string, read_uvarint, write_bytes, write_string, write_uvarint},
     types::{DecimalSize, TypeDesc},
     value::Value,
 };
@@ -225,6 +225,30 @@ pub(crate) fn read_value_optional<R: Read + ?Sized>(
             }
             Ok(Some(Value::Array(values)))
         }
+        TypeDesc::Json { typed_paths, .. } => {
+            let Some(path_count) = read_uvarint(reader)? else {
+                return Ok(None);
+            };
+            let path_count = usize::try_from(path_count)
+                .map_err(|_| Error::Overflow("JSON path count too large"))?;
+            let mut entries = Vec::with_capacity(path_count);
+            for _ in 0..path_count {
+                let path = read_string(reader)?.ok_or_else(|| {
+                    Error::Io(io::Error::new(
+                        io::ErrorKind::UnexpectedEof,
+                        "missing JSON path",
+                    ))
+                })?;
+                let value =
+                    if let Some((_, ty)) = typed_paths.iter().find(|(name, _)| name == &path) {
+                        read_value_required(ty, reader)?
+                    } else {
+                        read_value_required(&TypeDesc::Dynamic { max_types: None }, reader)?
+                    };
+                entries.push((path, value));
+            }
+            Ok(Some(Value::JsonObject(entries)))
+        }
         TypeDesc::Dynamic { .. } => {
             let mut tag = [0_u8; 1];
             if read_exact_or_eof(reader, &mut tag)? {
@@ -236,7 +260,7 @@ pub(crate) fn read_value_optional<R: Read + ?Sized>(
             };
             let value = read_value_required(&ty, reader)?;
             Ok(Some(Value::Dynamic {
-                ty,
+                ty: Box::new(ty),
                 value: Box::new(value),
             }))
         }
@@ -384,18 +408,29 @@ pub(crate) fn write_value<W: Write + ?Sized>(
                 write_tuple_values(items, values, writer)?;
             }
         }
+        (TypeDesc::Json { typed_paths, .. }, Value::JsonObject(entries)) => {
+            write_uvarint(entries.len() as u64, writer)?;
+            for (path, value) in entries {
+                write_string(path, writer)?;
+                if let Some((_, ty)) = typed_paths.iter().find(|(name, _)| name == path) {
+                    write_value(ty, value, writer)?;
+                } else {
+                    write_value(&TypeDesc::Dynamic { max_types: None }, value, writer)?;
+                }
+            }
+        }
         (TypeDesc::Dynamic { .. }, Value::DynamicNull)
         | (TypeDesc::Dynamic { .. }, Value::Nullable(None)) => {
             encode_type_binary_option(None, writer)?;
         }
         (TypeDesc::Dynamic { .. }, Value::Dynamic { ty, value }) => {
-            if matches!(ty, TypeDesc::Dynamic { .. }) {
+            if matches!(ty.as_ref(), TypeDesc::Dynamic { .. }) {
                 return Err(Error::UnsupportedCombination(
                     "Dynamic value cannot be Dynamic".into(),
                 ));
             }
-            encode_type_binary_option(Some(ty), writer)?;
-            write_value(ty, value, writer)?;
+            encode_type_binary_option(Some(ty.as_ref()), writer)?;
+            write_value(ty.as_ref(), value, writer)?;
         }
         (ty, value) => {
             return Err(Error::TypeMismatch {

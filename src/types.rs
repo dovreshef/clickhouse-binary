@@ -4,6 +4,10 @@ use std::fmt;
 
 use crate::error::{Error, Result};
 
+const JSON_DEFAULT_MAX_DYNAMIC_PATHS: usize = 1024;
+const JSON_DEFAULT_MAX_DYNAMIC_TYPES: u8 = 32;
+const JSON_MAX_TYPED_PATHS: usize = 1000;
+
 /// Parsed `ClickHouse` type descriptor.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TypeDesc {
@@ -121,6 +125,19 @@ pub enum TypeDesc {
         /// Optional max dynamic types setting.
         max_types: Option<u8>,
     },
+    /// JSON object with optional schema hints.
+    Json {
+        /// Maximum number of dynamic paths stored as subcolumns.
+        max_dynamic_paths: usize,
+        /// Maximum number of dynamic types in a Dynamic subcolumn.
+        max_dynamic_types: u8,
+        /// Typed paths with explicit types.
+        typed_paths: Vec<(String, TypeDesc)>,
+        /// Paths to skip during parsing.
+        skip_paths: Vec<String>,
+        /// Regex paths to skip during parsing.
+        skip_regexps: Vec<String>,
+    },
 }
 
 /// Named tuple element (name is optional).
@@ -204,6 +221,19 @@ impl TypeDesc {
                 Some(max_types) => format!("Dynamic(max_types={max_types})"),
                 None => "Dynamic".into(),
             },
+            TypeDesc::Json {
+                max_dynamic_paths,
+                max_dynamic_types,
+                typed_paths,
+                skip_paths,
+                skip_regexps,
+            } => format_json_type(
+                *max_dynamic_paths,
+                *max_dynamic_types,
+                typed_paths,
+                skip_paths,
+                skip_regexps,
+            ),
         }
     }
 }
@@ -247,7 +277,20 @@ pub fn parse_type_desc(input: &str) -> Result<TypeDesc> {
         "IPv4" => Ok(TypeDesc::Ipv4),
         "IPv6" => Ok(TypeDesc::Ipv6),
         "Dynamic" => Ok(TypeDesc::Dynamic { max_types: None }),
+        "JSON" => Ok(TypeDesc::Json {
+            max_dynamic_paths: JSON_DEFAULT_MAX_DYNAMIC_PATHS,
+            max_dynamic_types: JSON_DEFAULT_MAX_DYNAMIC_TYPES,
+            typed_paths: Vec::new(),
+            skip_paths: Vec::new(),
+            skip_regexps: Vec::new(),
+        }),
         _ => {
+            if let Some(inner) = trimmed.strip_prefix("JSON(") {
+                let inner = inner
+                    .strip_suffix(')')
+                    .ok_or(Error::InvalidValue("unterminated JSON type"))?;
+                return parse_json_descriptor(inner);
+            }
             if let Some(inner) = trimmed.strip_prefix("Decimal(") {
                 let inner = inner
                     .strip_suffix(')')
@@ -479,6 +522,7 @@ pub(crate) fn can_be_inside_low_cardinality(desc: &TypeDesc) -> bool {
         | TypeDesc::Tuple(_)
         | TypeDesc::Nested(_)
         | TypeDesc::Dynamic { .. }
+        | TypeDesc::Json { .. }
         | TypeDesc::DateTime64 { .. }
         | TypeDesc::Decimal { .. }
         | TypeDesc::Decimal32 { .. }
@@ -859,6 +903,141 @@ fn format_identifier(name: &str) -> String {
     }
 }
 
+fn format_json_type(
+    max_dynamic_paths: usize,
+    max_dynamic_types: u8,
+    typed_paths: &[(String, TypeDesc)],
+    skip_paths: &[String],
+    skip_regexps: &[String],
+) -> String {
+    let mut parts = Vec::new();
+    if max_dynamic_paths != JSON_DEFAULT_MAX_DYNAMIC_PATHS {
+        parts.push(format!("max_dynamic_paths={max_dynamic_paths}"));
+    }
+    if max_dynamic_types != JSON_DEFAULT_MAX_DYNAMIC_TYPES {
+        parts.push(format!("max_dynamic_types={max_dynamic_types}"));
+    }
+    for (path, ty) in typed_paths {
+        parts.push(format!("{} {}", format_identifier(path), ty.type_name()));
+    }
+    for path in skip_paths {
+        parts.push(format!("SKIP '{}'", escape_single_quoted(path)));
+    }
+    for regex in skip_regexps {
+        parts.push(format!("SKIP REGEXP '{}'", escape_single_quoted(regex)));
+    }
+    if parts.is_empty() {
+        "JSON".into()
+    } else {
+        format!("JSON({})", parts.join(", "))
+    }
+}
+
+fn escape_single_quoted(input: &str) -> String {
+    input.replace('\\', "\\\\").replace('\'', "\\'")
+}
+
+fn parse_json_descriptor(input: &str) -> Result<TypeDesc> {
+    let mut max_dynamic_paths = JSON_DEFAULT_MAX_DYNAMIC_PATHS;
+    let mut max_dynamic_types = JSON_DEFAULT_MAX_DYNAMIC_TYPES;
+    let mut typed_paths = Vec::new();
+    let mut skip_paths = Vec::new();
+    let mut skip_regexps = Vec::new();
+
+    let items = split_top_level_commas_with_parens(input);
+    for item in items {
+        let trimmed = item.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if let Some(rest) = trimmed.strip_prefix("max_dynamic_paths=") {
+            let value: usize = rest
+                .trim()
+                .parse()
+                .map_err(|_| Error::InvalidValue("invalid JSON max_dynamic_paths"))?;
+            max_dynamic_paths = value;
+            continue;
+        }
+        if let Some(rest) = trimmed.strip_prefix("max_dynamic_types=") {
+            let value: u64 = rest
+                .trim()
+                .parse()
+                .map_err(|_| Error::InvalidValue("invalid JSON max_dynamic_types"))?;
+            if value > u64::from(u8::MAX) {
+                return Err(Error::InvalidValue("JSON max_dynamic_types out of range"));
+            }
+            max_dynamic_types = u8::try_from(value)
+                .map_err(|_| Error::InvalidValue("JSON max_dynamic_types out of range"))?;
+            continue;
+        }
+        if let Some(rest) = trimmed.strip_prefix("SKIP REGEXP") {
+            let path = parse_json_path(rest.trim())?;
+            skip_regexps.push(path);
+            continue;
+        }
+        if let Some(rest) = trimmed.strip_prefix("SKIP") {
+            let path = parse_json_path(rest.trim())?;
+            skip_paths.push(path);
+            continue;
+        }
+        if let Some((name, ty)) = split_name_and_type(trimmed)? {
+            let name = parse_json_path(name)?;
+            let ty = parse_type_desc(ty)?;
+            typed_paths.push((name, ty));
+            continue;
+        }
+        return Err(Error::InvalidValue("invalid JSON type argument"));
+    }
+
+    if typed_paths.len() > JSON_MAX_TYPED_PATHS {
+        return Err(Error::InvalidValue("too many JSON typed paths"));
+    }
+
+    Ok(TypeDesc::Json {
+        max_dynamic_paths,
+        max_dynamic_types,
+        typed_paths,
+        skip_paths,
+        skip_regexps,
+    })
+}
+
+fn parse_json_path(input: &str) -> Result<String> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return Err(Error::InvalidValue("empty JSON path"));
+    }
+    if trimmed.starts_with('\'') && trimmed.ends_with('\'') && trimmed.len() >= 2 {
+        let inner = &trimmed[1..trimmed.len() - 1];
+        return unescape_single_quoted(inner);
+    }
+    if (trimmed.starts_with('`') && trimmed.ends_with('`'))
+        || (trimmed.starts_with('"') && trimmed.ends_with('"'))
+    {
+        return parse_identifier(trimmed);
+    }
+    Ok(trimmed.to_string())
+}
+
+fn unescape_single_quoted(input: &str) -> Result<String> {
+    let mut out = String::with_capacity(input.len());
+    let mut escape = false;
+    for ch in input.chars() {
+        if escape {
+            out.push(ch);
+            escape = false;
+        } else if ch == '\\' {
+            escape = true;
+        } else {
+            out.push(ch);
+        }
+    }
+    if escape {
+        return Err(Error::InvalidValue("invalid escape in JSON path"));
+    }
+    Ok(out)
+}
+
 fn format_enum<T: fmt::Display>(prefix: &str, values: &[(String, T)]) -> String {
     let entries: Vec<String> = values
         .iter()
@@ -931,6 +1110,34 @@ mod tests {
             parse_type_desc("Dynamic(max_types=12)").unwrap(),
             TypeDesc::Dynamic {
                 max_types: Some(12)
+            }
+        );
+    }
+
+    #[test]
+    fn parses_json_types() {
+        assert_eq!(
+            parse_type_desc("JSON").unwrap(),
+            TypeDesc::Json {
+                max_dynamic_paths: JSON_DEFAULT_MAX_DYNAMIC_PATHS,
+                max_dynamic_types: JSON_DEFAULT_MAX_DYNAMIC_TYPES,
+                typed_paths: Vec::new(),
+                skip_paths: Vec::new(),
+                skip_regexps: Vec::new(),
+            }
+        );
+        let parsed = parse_type_desc(
+            "JSON(max_dynamic_paths=10, max_dynamic_types=4, a UInt8, SKIP 'b', SKIP REGEXP '^c')",
+        )
+        .unwrap();
+        assert_eq!(
+            parsed,
+            TypeDesc::Json {
+                max_dynamic_paths: 10,
+                max_dynamic_types: 4,
+                typed_paths: vec![("a".to_string(), TypeDesc::UInt8)],
+                skip_paths: vec!["b".to_string()],
+                skip_regexps: vec!["^c".to_string()],
             }
         );
     }

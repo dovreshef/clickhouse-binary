@@ -119,3 +119,25 @@ fn map_string_uint8_multi_row_writing() {
         server.exec(&format!("TRUNCATE TABLE {table}"));
     }
 }
+
+#[test]
+fn map_rejects_nullable_key_schema() {
+    // ClickHouse forbids Nullable keys in Map types; reject during schema parsing.
+    let err = Schema::from_type_strings(&[("value", "Map(Nullable(String), UInt8)")]);
+    assert!(err.is_err());
+}
+
+#[test]
+fn map_rejects_low_cardinality_nullable_key_schema() {
+    // LowCardinality(Nullable(...)) should also be rejected for Map keys.
+    let err =
+        Schema::from_type_strings(&[("value", "Map(LowCardinality(Nullable(String)), UInt8)")]);
+    assert!(err.is_err());
+}
+
+#[test]
+fn map_allows_low_cardinality_key_schema() {
+    // LowCardinality(String) is a valid Map key.
+    let schema = Schema::from_type_strings(&[("value", "Map(LowCardinality(String), UInt8)")]);
+    assert!(schema.is_ok());
+}

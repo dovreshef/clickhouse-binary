@@ -1,4 +1,4 @@
-use clickhouse_binary::{Row, RowBinaryFormat, RowBinaryReader, RowBinaryWriter, Schema, Value};
+use clickhouse_rowbinary::{Row, RowBinaryFormat, RowBinaryReader, RowBinaryWriter, Schema, Value};
 
 use crate::common::decode_rows;
 

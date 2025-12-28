@@ -2,7 +2,7 @@
 
 use std::io::Read;
 
-use clickhouse_binary::{Row, RowBinaryFormat, RowBinaryReader, RowBinaryWriter, Schema, Value};
+use clickhouse_rowbinary::{Row, RowBinaryFormat, RowBinaryReader, RowBinaryWriter, Schema, Value};
 use rand::{Rng, distr::Alphanumeric, rng};
 use serde_json::Value as JsonValue;
 use ureq::{Agent, Body, Error as UreqError, config::Config, http::Response as HttpResponse};

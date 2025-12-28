@@ -1,6 +1,6 @@
 # ClickHouse RowBinary Toolkit (Rust)
 
-`clickhouse-binary` is a small Rust library for reading and writing ClickHouse
+`clickhouse-rowbinary` is a small Rust library for reading and writing ClickHouse
 RowBinary formats: `RowBinary`, `RowBinaryWithNames`, and
 `RowBinaryWithNamesAndTypes`. It is designed for streaming ingestion and
 validation against a live ClickHouse server.
@@ -15,7 +15,7 @@ validation against a live ClickHouse server.
 ## Usage
 
 ```rust
-use clickhouse_binary::{RowBinaryFormat, RowBinaryWriter, Schema, Value};
+use clickhouse_rowbinary::{RowBinaryFormat, RowBinaryWriter, Schema, Value};
 
 let schema = Schema::from_type_strings(&[
     ("id", "UInt32"),

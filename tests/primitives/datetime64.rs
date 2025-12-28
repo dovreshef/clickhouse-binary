@@ -1,4 +1,4 @@
-use clickhouse_binary::{RowBinaryFormat, Schema, Value};
+use clickhouse_rowbinary::{RowBinaryFormat, Schema, Value};
 use serde_json::json;
 
 use crate::common::{ClickhouseServer, decode_rows, unique_table};
@@ -208,7 +208,7 @@ fn datetime64_low_cardinality_is_rejected() {
         .expect_err("expected schema parsing to reject LowCardinality(DateTime64)");
     assert!(matches!(
         err,
-        clickhouse_binary::Error::UnsupportedCombination(_)
+        clickhouse_rowbinary::Error::UnsupportedCombination(_)
     ));
 }
 

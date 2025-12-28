@@ -1,6 +1,6 @@
 use std::{fs::File, io::Write, thread};
 
-use clickhouse_binary::{Row, RowBinaryFormat, RowBinaryReader, RowBinaryWriter, Schema, Value};
+use clickhouse_rowbinary::{Row, RowBinaryFormat, RowBinaryReader, RowBinaryWriter, Schema, Value};
 use zstd::stream::{Decoder, Encoder};
 
 use crate::common::unique_table;

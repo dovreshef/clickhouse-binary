@@ -1,6 +1,6 @@
 use std::net::Ipv4Addr;
 
-use clickhouse_binary::{RowBinaryFormat, Schema, Value};
+use clickhouse_rowbinary::{RowBinaryFormat, Schema, Value};
 use serde_json::json;
 
 use crate::common::{ClickhouseServer, decode_rows, unique_table};

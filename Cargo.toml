@@ -1,5 +1,5 @@
 [package]
-name = "clickhouse_binary"
+name = "clickhouse_rowbinary"
 version = "0.1.0"
 edition = "2024"
 authors = ["Dov Reshef <reshef.dov@gmail.com>"]
@@ -8,8 +8,8 @@ description = "RowBinary encoder/decoder for ClickHouse"
 readme = "README.md"
 keywords = ["clickhouse", "rowbinary", "serialization", "encoding", "database"]
 categories = ["encoding", "database", "parser-implementations"]
-documentation = "https://docs.rs/clickhouse_binary"
-repository = "https://github.com/dovreshef/clickhouse-binary"
+documentation = "https://docs.rs/clickhouse_rowbinary"
+repository = "https://github.com/dovreshef/clickhouse-rowbinary"
 exclude = [
     ".github/**/*",
 ]

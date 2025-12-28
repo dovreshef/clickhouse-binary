@@ -1,4 +1,4 @@
-use clickhouse_binary::{Row, RowBinaryFormat, Schema, Value};
+use clickhouse_rowbinary::{Row, RowBinaryFormat, Schema, Value};
 
 use crate::common::{ClickhouseServer, decode_rows, normalize_json_rows, unique_table};
 
@@ -69,7 +69,7 @@ fn json_stress_rows() -> (Row, Row) {
         (
             "note".to_string(),
             Value::Dynamic {
-                ty: Box::new(clickhouse_binary::TypeDesc::String),
+                ty: Box::new(clickhouse_rowbinary::TypeDesc::String),
                 value: Box::new(Value::String(b"hi".to_vec())),
             },
         ),

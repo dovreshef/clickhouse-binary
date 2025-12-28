@@ -1,4 +1,4 @@
-use clickhouse_binary::{
+use clickhouse_rowbinary::{
     Error, RowBinaryFormat, RowBinaryReader, Schema, TypeDesc, Value, types::TupleItem,
 };
 use serde_json::json;

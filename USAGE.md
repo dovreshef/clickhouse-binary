@@ -12,7 +12,7 @@ payload when you hit the batch size.
 use std::fs::File;
 use std::io::{BufReader, BufWriter, Read, Write};
 
-use clickhouse_binary::{
+use clickhouse_rowbinary::{
     RowBinaryFormat, RowBinaryReader, RowBinaryWriter, Schema, Value,
 };
 use zstd::stream::{Decoder, Encoder};
@@ -83,7 +83,7 @@ encoded as `Array(Tuple(...))`, so the decoded `TypeDesc` will be that array
 form rather than `Nested`.
 
 ```rust
-use clickhouse_binary::{RowBinaryFormat, RowBinaryWriter, Schema, TypeDesc, Value};
+use clickhouse_rowbinary::{RowBinaryFormat, RowBinaryWriter, Schema, TypeDesc, Value};
 
 let schema = Schema::from_type_strings(&[("value", "Dynamic")])?;
 let mut writer = RowBinaryWriter::new(Vec::new(), RowBinaryFormat::RowBinary, schema);
@@ -111,7 +111,7 @@ will emit `n.a`, `n.b` payloads in the expected order. This conversion buffers
 the nested values to transpose rows into per-field arrays.
 
 ```rust
-use clickhouse_binary::{RowBinaryFormat, RowBinaryWriter, Schema, Value};
+use clickhouse_rowbinary::{RowBinaryFormat, RowBinaryWriter, Schema, Value};
 
 let schema = Schema::from_type_strings(&[("n", "Nested(a UInt8, b String)")])?;
 let mut writer = RowBinaryWriter::new(Vec::new(), RowBinaryFormat::RowBinary, schema);
@@ -133,7 +133,7 @@ use std::fs::File;
 use std::io::Write;
 use std::thread;
 
-use clickhouse_binary::{RowBinaryFormat, RowBinaryWriter, Schema, Value};
+use clickhouse_rowbinary::{RowBinaryFormat, RowBinaryWriter, Schema, Value};
 use zstd::stream::Encoder;
 
 let schema = Schema::from_type_strings(&[("id", "UInt8"), ("name", "String")])?;
@@ -142,7 +142,7 @@ let handle = |rows: Vec<Vec<Value>>| {
     thread::spawn(move || {
         let mut writer = RowBinaryWriter::new(Vec::new(), RowBinaryFormat::RowBinary, schema);
         writer.write_rows(&rows)?;
-        Ok::<_, clickhouse_binary::Error>(writer.into_inner())
+        Ok::<_, clickhouse_rowbinary::Error>(writer.into_inner())
     })
 };
 

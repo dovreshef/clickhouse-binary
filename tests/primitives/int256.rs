@@ -1,4 +1,4 @@
-use clickhouse_binary::{RowBinaryFormat, Schema, Value};
+use clickhouse_rowbinary::{RowBinaryFormat, Schema, Value};
 use serde_json::json;
 
 use crate::common::{ClickhouseServer, decimal256_from_i128, decode_rows, unique_table};

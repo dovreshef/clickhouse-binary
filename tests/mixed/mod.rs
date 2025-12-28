@@ -1,6 +1,6 @@
 use std::net::{Ipv4Addr, Ipv6Addr};
 
-use clickhouse_binary::{Row, RowBinaryFormat, Schema, TypeDesc, Value};
+use clickhouse_rowbinary::{Row, RowBinaryFormat, Schema, TypeDesc, Value};
 use uuid::Uuid;
 
 use crate::common::{ClickhouseServer, decode_rows, normalize_json_rows, unique_table};

@@ -1,4 +1,4 @@
-use clickhouse_binary::{RowBinaryFormat, Schema, TypeDesc, Value};
+use clickhouse_rowbinary::{RowBinaryFormat, Schema, TypeDesc, Value};
 
 use crate::common::{ClickhouseServer, decode_rows, normalize_json_rows, unique_table};
 

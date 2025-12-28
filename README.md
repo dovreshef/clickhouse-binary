@@ -29,6 +29,9 @@ let payload = writer.into_inner();
 For `RowBinaryWithNames` and `RowBinaryWithNamesAndTypes`, the header is written
 automatically from the schema.
 
+See `usage.md` for end-to-end streaming examples (compressed files, batching,
+and multi-threaded producers).
+
 ## Supported Types
 
 Currently supported:

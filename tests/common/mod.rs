@@ -41,6 +41,11 @@ impl ClickhouseServer {
         Self::expect_success(self.send_query(sql, None, None), "SQL failed");
     }
 
+    /// Executes SQL with `ClickHouse` settings passed as URL parameters.
+    pub fn exec_with_settings(&self, sql: &str, settings: &str) {
+        Self::expect_success(self.send_query(sql, None, Some(settings)), "SQL failed");
+    }
+
     /// Streams a `RowBinary` payload into an INSERT statement.
     pub fn insert_rowbinary(
         &self,

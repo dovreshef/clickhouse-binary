@@ -47,6 +47,10 @@ pub enum Value {
     Ipv6(Ipv6Addr),
     /// Nullable wrapper around another value.
     Nullable(Option<Box<Value>>),
+    /// Array of nested values.
+    Array(Vec<Value>),
+    /// Map represented as key/value pairs.
+    Map(Vec<(Value, Value)>),
 }
 
 impl Value {
@@ -74,6 +78,8 @@ impl Value {
             Value::Ipv4(_) => "IPv4",
             Value::Ipv6(_) => "IPv6",
             Value::Nullable(_) => "Nullable",
+            Value::Array(_) => "Array",
+            Value::Map(_) => "Map",
         }
     }
 }

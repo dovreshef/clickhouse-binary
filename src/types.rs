@@ -58,6 +58,17 @@ pub enum TypeDesc {
     Ipv6,
     /// Nullable wrapper around another type.
     Nullable(Box<TypeDesc>),
+    /// Dictionary-encoded values stored as a low cardinality column.
+    LowCardinality(Box<TypeDesc>),
+    /// Array of nested values.
+    Array(Box<TypeDesc>),
+    /// Map implemented as Array(Tuple(key, value)).
+    Map {
+        /// Map key type.
+        key: Box<TypeDesc>,
+        /// Map value type.
+        value: Box<TypeDesc>,
+    },
 }
 
 impl TypeDesc {
@@ -94,6 +105,11 @@ impl TypeDesc {
             TypeDesc::Ipv4 => "IPv4".into(),
             TypeDesc::Ipv6 => "IPv6".into(),
             TypeDesc::Nullable(inner) => format!("Nullable({})", inner.type_name()),
+            TypeDesc::LowCardinality(inner) => format!("LowCardinality({})", inner.type_name()),
+            TypeDesc::Array(inner) => format!("Array({})", inner.type_name()),
+            TypeDesc::Map { key, value } => {
+                format!("Map({}, {})", key.type_name(), value.type_name())
+            }
         }
     }
 }
@@ -110,6 +126,7 @@ impl fmt::Display for TypeDesc {
 ///
 /// Returns [`Error::InvalidValue`] when the descriptor is malformed or
 /// [`Error::UnsupportedType`] for unsupported types.
+#[allow(clippy::too_many_lines)]
 pub fn parse_type_desc(input: &str) -> Result<TypeDesc> {
     let trimmed = input.trim();
     match trimmed {
@@ -131,6 +148,23 @@ pub fn parse_type_desc(input: &str) -> Result<TypeDesc> {
         "IPv4" => Ok(TypeDesc::Ipv4),
         "IPv6" => Ok(TypeDesc::Ipv6),
         _ => {
+            if let Some(inner) = trimmed.strip_prefix("LowCardinality(") {
+                let inner = inner
+                    .strip_suffix(')')
+                    .ok_or(Error::InvalidValue("unterminated LowCardinality type"))?;
+                let desc = parse_type_desc(inner)?;
+                if matches!(desc, TypeDesc::LowCardinality(_)) {
+                    return Err(Error::UnsupportedCombination(
+                        "LowCardinality(LowCardinality(T)) is unsupported".into(),
+                    ));
+                }
+                if matches!(desc, TypeDesc::DateTime64 { .. }) {
+                    return Err(Error::UnsupportedCombination(
+                        "LowCardinality(DateTime64) is unsupported".into(),
+                    ));
+                }
+                return Ok(TypeDesc::LowCardinality(Box::new(desc)));
+            }
             if let Some(inner) = trimmed.strip_prefix("Nullable(") {
                 let inner = inner
                     .strip_suffix(')')
@@ -142,6 +176,23 @@ pub fn parse_type_desc(input: &str) -> Result<TypeDesc> {
                     ));
                 }
                 return Ok(TypeDesc::Nullable(Box::new(desc)));
+            }
+            if let Some(inner) = trimmed.strip_prefix("Array(") {
+                let inner = inner
+                    .strip_suffix(')')
+                    .ok_or(Error::InvalidValue("unterminated Array type"))?;
+                let desc = parse_type_desc(inner)?;
+                return Ok(TypeDesc::Array(Box::new(desc)));
+            }
+            if let Some(inner) = trimmed.strip_prefix("Map(") {
+                let inner = inner
+                    .strip_suffix(')')
+                    .ok_or(Error::InvalidValue("unterminated Map type"))?;
+                let (key, value) = parse_map_descriptor(inner)?;
+                return Ok(TypeDesc::Map {
+                    key: Box::new(key),
+                    value: Box::new(value),
+                });
             }
             if let Some(inner) = trimmed.strip_prefix("DateTime(") {
                 let inner = inner
@@ -206,4 +257,25 @@ fn parse_datetime64(input: &str) -> Result<(u8, Option<String>)> {
         None
     };
     Ok((precision, timezone))
+}
+
+fn parse_map_descriptor(input: &str) -> Result<(TypeDesc, TypeDesc)> {
+    let mut depth = 0_i32;
+    let mut split = None;
+    for (idx, ch) in input.char_indices() {
+        match ch {
+            '(' => depth += 1,
+            ')' => depth -= 1,
+            ',' if depth == 0 => {
+                split = Some(idx);
+                break;
+            }
+            _ => {}
+        }
+    }
+    let split = split.ok_or(Error::InvalidValue("Map expects two type arguments"))?;
+    let (left, right) = input.split_at(split);
+    let key = parse_type_desc(left.trim())?;
+    let value = parse_type_desc(right[1..].trim())?;
+    Ok((key, value))
 }

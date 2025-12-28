@@ -1,5 +1,3 @@
-use std::net::Ipv4Addr;
-
 use clickhouse_binary::{RowBinaryFormat, Schema, Value};
 use serde_json::json;
 
@@ -12,64 +10,51 @@ const FORMATS: [RowBinaryFormat; 3] = [
 ];
 
 #[test]
-fn ipv4_single_row_reading() {
+fn int8_single_row_reading() {
     let server = ClickhouseServer::connect();
     let table = unique_table("");
-    server.exec(&format!("CREATE TABLE {table} (value IPv4) ENGINE=Memory"));
-    server.exec(&format!("INSERT INTO {table} VALUES ('127.0.0.1')"));
-    let schema = Schema::from_type_strings(&[("value", "IPv4")]).unwrap();
+    server.exec(&format!("CREATE TABLE {table} (value Int8) ENGINE=Memory"));
+    server.exec(&format!("INSERT INTO {table} VALUES (-5)"));
+    let schema = Schema::from_type_strings(&[("value", "Int8")]).unwrap();
 
     for format in FORMATS {
         let payload = server.fetch_rowbinary(&format!("SELECT value FROM {table}"), format);
         let decoded = decode_rows(&payload, format, &schema);
-        assert_eq!(decoded, vec![vec![Value::Ipv4(Ipv4Addr::LOCALHOST)]]);
+        assert_eq!(decoded, vec![vec![Value::Int8(-5)]]);
     }
 
     server.exec(&format!("DROP TABLE {table}"));
 }
 
 #[test]
-fn ipv4_multi_row_reading() {
+fn int8_multi_row_reading() {
     let server = ClickhouseServer::connect();
     let table = unique_table("");
-    server.exec(&format!("CREATE TABLE {table} (value IPv4) ENGINE=Memory"));
-    server.exec(&format!(
-        "INSERT INTO {table} VALUES ('127.0.0.1'),('10.0.0.1')"
-    ));
-    let schema = Schema::from_type_strings(&[("value", "IPv4")]).unwrap();
+    server.exec(&format!("CREATE TABLE {table} (value Int8) ENGINE=Memory"));
+    server.exec(&format!("INSERT INTO {table} VALUES (-5),(42)"));
+    let schema = Schema::from_type_strings(&[("value", "Int8")]).unwrap();
 
     for format in FORMATS {
         let payload = server.fetch_rowbinary(&format!("SELECT value FROM {table}"), format);
         let decoded = decode_rows(&payload, format, &schema);
-        assert_eq!(
-            decoded,
-            vec![
-                vec![Value::Ipv4(Ipv4Addr::LOCALHOST)],
-                vec![Value::Ipv4(Ipv4Addr::new(10, 0, 0, 1))],
-            ]
-        );
+        assert_eq!(decoded, vec![vec![Value::Int8(-5)], vec![Value::Int8(42)]]);
     }
 
     server.exec(&format!("DROP TABLE {table}"));
 }
 
 #[test]
-fn ipv4_single_row_writing() {
+fn int8_single_row_writing() {
     let server = ClickhouseServer::connect();
     let table = unique_table("");
-    server.exec(&format!("CREATE TABLE {table} (value IPv4) ENGINE=Memory"));
-    let schema = Schema::from_type_strings(&[("value", "IPv4")]).unwrap();
+    server.exec(&format!("CREATE TABLE {table} (value Int8) ENGINE=Memory"));
+    let schema = Schema::from_type_strings(&[("value", "Int8")]).unwrap();
 
     for format in FORMATS {
         let insert_sql = format!("INSERT INTO {table} FORMAT {format}");
-        server.insert_rowbinary(
-            &insert_sql,
-            format,
-            &schema,
-            &[vec![Value::Ipv4(Ipv4Addr::LOCALHOST)]],
-        );
+        server.insert_rowbinary(&insert_sql, format, &schema, &[vec![Value::Int8(-5)]]);
         let json_rows = server.fetch_json(&format!("SELECT value FROM {table}"));
-        assert_eq!(json_rows, vec![json!({"value": "127.0.0.1"})]);
+        assert_eq!(json_rows, vec![json!({"value": -5})]);
         server.exec(&format!("TRUNCATE TABLE {table}"));
     }
 
@@ -77,11 +62,11 @@ fn ipv4_single_row_writing() {
 }
 
 #[test]
-fn ipv4_multi_row_writing() {
+fn int8_multi_row_writing() {
     let server = ClickhouseServer::connect();
     let table = unique_table("");
-    server.exec(&format!("CREATE TABLE {table} (value IPv4) ENGINE=Memory"));
-    let schema = Schema::from_type_strings(&[("value", "IPv4")]).unwrap();
+    server.exec(&format!("CREATE TABLE {table} (value Int8) ENGINE=Memory"));
+    let schema = Schema::from_type_strings(&[("value", "Int8")]).unwrap();
 
     for format in FORMATS {
         let insert_sql = format!("INSERT INTO {table} FORMAT {format}");
@@ -89,16 +74,10 @@ fn ipv4_multi_row_writing() {
             &insert_sql,
             format,
             &schema,
-            &[
-                vec![Value::Ipv4(Ipv4Addr::LOCALHOST)],
-                vec![Value::Ipv4(Ipv4Addr::new(10, 0, 0, 1))],
-            ],
+            &[vec![Value::Int8(-5)], vec![Value::Int8(42)]],
         );
         let json_rows = server.fetch_json(&format!("SELECT value FROM {table}"));
-        assert_eq!(
-            json_rows,
-            vec![json!({"value": "127.0.0.1"}), json!({"value": "10.0.0.1"})]
-        );
+        assert_eq!(json_rows, vec![json!({"value": -5}), json!({"value": 42})]);
         server.exec(&format!("TRUNCATE TABLE {table}"));
     }
 
@@ -106,14 +85,14 @@ fn ipv4_multi_row_writing() {
 }
 
 #[test]
-fn ipv4_nullable_single_row_reading() {
+fn int8_nullable_single_row_reading() {
     let server = ClickhouseServer::connect();
     let table = unique_table("");
     server.exec(&format!(
-        "CREATE TABLE {table} (value Nullable(IPv4)) ENGINE=Memory"
+        "CREATE TABLE {table} (value Nullable(Int8)) ENGINE=Memory"
     ));
     server.exec(&format!("INSERT INTO {table} VALUES (NULL)"));
-    let schema = Schema::from_type_strings(&[("value", "Nullable(IPv4)")]).unwrap();
+    let schema = Schema::from_type_strings(&[("value", "Nullable(Int8)")]).unwrap();
 
     for format in FORMATS {
         let payload = server.fetch_rowbinary(&format!("SELECT value FROM {table}"), format);
@@ -125,14 +104,14 @@ fn ipv4_nullable_single_row_reading() {
 }
 
 #[test]
-fn ipv4_nullable_multi_row_reading() {
+fn int8_nullable_multi_row_reading() {
     let server = ClickhouseServer::connect();
     let table = unique_table("");
     server.exec(&format!(
-        "CREATE TABLE {table} (value Nullable(IPv4)) ENGINE=Memory"
+        "CREATE TABLE {table} (value Nullable(Int8)) ENGINE=Memory"
     ));
-    server.exec(&format!("INSERT INTO {table} VALUES (NULL),('127.0.0.1')"));
-    let schema = Schema::from_type_strings(&[("value", "Nullable(IPv4)")]).unwrap();
+    server.exec(&format!("INSERT INTO {table} VALUES (NULL),(-5)"));
+    let schema = Schema::from_type_strings(&[("value", "Nullable(Int8)")]).unwrap();
 
     for format in FORMATS {
         let payload = server.fetch_rowbinary(&format!("SELECT value FROM {table}"), format);
@@ -141,9 +120,7 @@ fn ipv4_nullable_multi_row_reading() {
             decoded,
             vec![
                 vec![Value::Nullable(None)],
-                vec![Value::Nullable(Some(Box::new(Value::Ipv4(
-                    Ipv4Addr::LOCALHOST,
-                ))))],
+                vec![Value::Nullable(Some(Box::new(Value::Int8(-5))))],
             ]
         );
     }
@@ -152,13 +129,13 @@ fn ipv4_nullable_multi_row_reading() {
 }
 
 #[test]
-fn ipv4_nullable_single_row_writing() {
+fn int8_nullable_single_row_writing() {
     let server = ClickhouseServer::connect();
     let table = unique_table("");
     server.exec(&format!(
-        "CREATE TABLE {table} (value Nullable(IPv4)) ENGINE=Memory"
+        "CREATE TABLE {table} (value Nullable(Int8)) ENGINE=Memory"
     ));
-    let schema = Schema::from_type_strings(&[("value", "Nullable(IPv4)")]).unwrap();
+    let schema = Schema::from_type_strings(&[("value", "Nullable(Int8)")]).unwrap();
 
     for format in FORMATS {
         let insert_sql = format!("INSERT INTO {table} FORMAT {format}");
@@ -172,13 +149,13 @@ fn ipv4_nullable_single_row_writing() {
 }
 
 #[test]
-fn ipv4_nullable_multi_row_writing() {
+fn int8_nullable_multi_row_writing() {
     let server = ClickhouseServer::connect();
     let table = unique_table("");
     server.exec(&format!(
-        "CREATE TABLE {table} (value Nullable(IPv4)) ENGINE=Memory"
+        "CREATE TABLE {table} (value Nullable(Int8)) ENGINE=Memory"
     ));
-    let schema = Schema::from_type_strings(&[("value", "Nullable(IPv4)")]).unwrap();
+    let schema = Schema::from_type_strings(&[("value", "Nullable(Int8)")]).unwrap();
 
     for format in FORMATS {
         let insert_sql = format!("INSERT INTO {table} FORMAT {format}");
@@ -188,15 +165,13 @@ fn ipv4_nullable_multi_row_writing() {
             &schema,
             &[
                 vec![Value::Nullable(None)],
-                vec![Value::Nullable(Some(Box::new(Value::Ipv4(
-                    Ipv4Addr::LOCALHOST,
-                ))))],
+                vec![Value::Nullable(Some(Box::new(Value::Int8(-5))))],
             ],
         );
         let json_rows = server.fetch_json(&format!("SELECT value FROM {table}"));
         assert_eq!(
             json_rows,
-            vec![json!({"value": null}), json!({"value": "127.0.0.1"})]
+            vec![json!({"value": null}), json!({"value": -5})]
         );
         server.exec(&format!("TRUNCATE TABLE {table}"));
     }
@@ -205,37 +180,35 @@ fn ipv4_nullable_multi_row_writing() {
 }
 
 #[test]
-fn ipv4_low_cardinality_single_row_reading() {
+fn int8_low_cardinality_single_row_reading() {
     let server = ClickhouseServer::connect();
     let table = unique_table("");
     server.exec_with_settings(
-        &format!("CREATE TABLE {table} (value LowCardinality(IPv4)) ENGINE=Memory"),
+        &format!("CREATE TABLE {table} (value LowCardinality(Int8)) ENGINE=Memory"),
         "allow_suspicious_low_cardinality_types=1",
     );
-    server.exec(&format!("INSERT INTO {table} VALUES ('127.0.0.1')"));
-    let schema = Schema::from_type_strings(&[("value", "LowCardinality(IPv4)")]).unwrap();
+    server.exec(&format!("INSERT INTO {table} VALUES (-5)"));
+    let schema = Schema::from_type_strings(&[("value", "LowCardinality(Int8)")]).unwrap();
 
     for format in FORMATS {
         let payload = server.fetch_rowbinary(&format!("SELECT value FROM {table}"), format);
         let decoded = decode_rows(&payload, format, &schema);
-        assert_eq!(decoded, vec![vec![Value::Ipv4(Ipv4Addr::LOCALHOST)]]);
+        assert_eq!(decoded, vec![vec![Value::Int8(-5)]]);
     }
 
     server.exec(&format!("DROP TABLE {table}"));
 }
 
 #[test]
-fn ipv4_low_cardinality_multi_row_reading() {
+fn int8_low_cardinality_multi_row_reading() {
     let server = ClickhouseServer::connect();
     let table = unique_table("");
     server.exec_with_settings(
-        &format!("CREATE TABLE {table} (value LowCardinality(IPv4)) ENGINE=Memory"),
+        &format!("CREATE TABLE {table} (value LowCardinality(Int8)) ENGINE=Memory"),
         "allow_suspicious_low_cardinality_types=1",
     );
-    server.exec(&format!(
-        "INSERT INTO {table} VALUES ('127.0.0.1'),('10.0.0.1'),('127.0.0.1')"
-    ));
-    let schema = Schema::from_type_strings(&[("value", "LowCardinality(IPv4)")]).unwrap();
+    server.exec(&format!("INSERT INTO {table} VALUES (-5),(42),(-5)"));
+    let schema = Schema::from_type_strings(&[("value", "LowCardinality(Int8)")]).unwrap();
 
     for format in FORMATS {
         let payload = server.fetch_rowbinary(&format!("SELECT value FROM {table}"), format);
@@ -243,9 +216,9 @@ fn ipv4_low_cardinality_multi_row_reading() {
         assert_eq!(
             decoded,
             vec![
-                vec![Value::Ipv4(Ipv4Addr::LOCALHOST)],
-                vec![Value::Ipv4(Ipv4Addr::new(10, 0, 0, 1))],
-                vec![Value::Ipv4(Ipv4Addr::LOCALHOST)],
+                vec![Value::Int8(-5)],
+                vec![Value::Int8(42)],
+                vec![Value::Int8(-5)],
             ]
         );
     }
@@ -254,25 +227,20 @@ fn ipv4_low_cardinality_multi_row_reading() {
 }
 
 #[test]
-fn ipv4_low_cardinality_single_row_writing() {
+fn int8_low_cardinality_single_row_writing() {
     let server = ClickhouseServer::connect();
     let table = unique_table("");
     server.exec_with_settings(
-        &format!("CREATE TABLE {table} (value LowCardinality(IPv4)) ENGINE=Memory"),
+        &format!("CREATE TABLE {table} (value LowCardinality(Int8)) ENGINE=Memory"),
         "allow_suspicious_low_cardinality_types=1",
     );
-    let schema = Schema::from_type_strings(&[("value", "LowCardinality(IPv4)")]).unwrap();
+    let schema = Schema::from_type_strings(&[("value", "LowCardinality(Int8)")]).unwrap();
 
     for format in FORMATS {
         let insert_sql = format!("INSERT INTO {table} FORMAT {format}");
-        server.insert_rowbinary(
-            &insert_sql,
-            format,
-            &schema,
-            &[vec![Value::Ipv4(Ipv4Addr::LOCALHOST)]],
-        );
+        server.insert_rowbinary(&insert_sql, format, &schema, &[vec![Value::Int8(-5)]]);
         let json_rows = server.fetch_json(&format!("SELECT value FROM {table}"));
-        assert_eq!(json_rows, vec![json!({"value": "127.0.0.1"})]);
+        assert_eq!(json_rows, vec![json!({"value": -5})]);
         server.exec(&format!("TRUNCATE TABLE {table}"));
     }
 
@@ -280,14 +248,14 @@ fn ipv4_low_cardinality_single_row_writing() {
 }
 
 #[test]
-fn ipv4_low_cardinality_multi_row_writing() {
+fn int8_low_cardinality_multi_row_writing() {
     let server = ClickhouseServer::connect();
     let table = unique_table("");
     server.exec_with_settings(
-        &format!("CREATE TABLE {table} (value LowCardinality(IPv4)) ENGINE=Memory"),
+        &format!("CREATE TABLE {table} (value LowCardinality(Int8)) ENGINE=Memory"),
         "allow_suspicious_low_cardinality_types=1",
     );
-    let schema = Schema::from_type_strings(&[("value", "LowCardinality(IPv4)")]).unwrap();
+    let schema = Schema::from_type_strings(&[("value", "LowCardinality(Int8)")]).unwrap();
 
     for format in FORMATS {
         let insert_sql = format!("INSERT INTO {table} FORMAT {format}");
@@ -295,16 +263,10 @@ fn ipv4_low_cardinality_multi_row_writing() {
             &insert_sql,
             format,
             &schema,
-            &[
-                vec![Value::Ipv4(Ipv4Addr::LOCALHOST)],
-                vec![Value::Ipv4(Ipv4Addr::new(10, 0, 0, 1))],
-            ],
+            &[vec![Value::Int8(-5)], vec![Value::Int8(42)]],
         );
         let json_rows = server.fetch_json(&format!("SELECT value FROM {table}"));
-        assert_eq!(
-            json_rows,
-            vec![json!({"value": "127.0.0.1"}), json!({"value": "10.0.0.1"})]
-        );
+        assert_eq!(json_rows, vec![json!({"value": -5}), json!({"value": 42})]);
         server.exec(&format!("TRUNCATE TABLE {table}"));
     }
 

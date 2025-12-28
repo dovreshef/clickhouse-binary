@@ -192,3 +192,100 @@ fn float64_nullable_multi_row_writing() {
 
     server.exec(&format!("DROP TABLE {table}"));
 }
+
+#[test]
+fn float64_low_cardinality_single_row_reading() {
+    let server = ClickhouseServer::connect();
+    let table = unique_table("");
+    server.exec_with_settings(
+        &format!("CREATE TABLE {table} (value LowCardinality(Float64)) ENGINE=Memory"),
+        "allow_suspicious_low_cardinality_types=1",
+    );
+    server.exec(&format!("INSERT INTO {table} VALUES (1.5)"));
+    let schema = Schema::from_type_strings(&[("value", "LowCardinality(Float64)")]).unwrap();
+
+    for format in FORMATS {
+        let payload = server.fetch_rowbinary(&format!("SELECT value FROM {table}"), format);
+        let decoded = decode_rows(&payload, format, &schema);
+        assert_eq!(decoded, vec![vec![Value::Float64(1.5)]]);
+    }
+
+    server.exec(&format!("DROP TABLE {table}"));
+}
+
+#[test]
+fn float64_low_cardinality_multi_row_reading() {
+    let server = ClickhouseServer::connect();
+    let table = unique_table("");
+    server.exec_with_settings(
+        &format!("CREATE TABLE {table} (value LowCardinality(Float64)) ENGINE=Memory"),
+        "allow_suspicious_low_cardinality_types=1",
+    );
+    server.exec(&format!("INSERT INTO {table} VALUES (1.5),(-2.25),(1.5)"));
+    let schema = Schema::from_type_strings(&[("value", "LowCardinality(Float64)")]).unwrap();
+
+    for format in FORMATS {
+        let payload = server.fetch_rowbinary(&format!("SELECT value FROM {table}"), format);
+        let decoded = decode_rows(&payload, format, &schema);
+        assert_eq!(
+            decoded,
+            vec![
+                vec![Value::Float64(1.5)],
+                vec![Value::Float64(-2.25)],
+                vec![Value::Float64(1.5)],
+            ]
+        );
+    }
+
+    server.exec(&format!("DROP TABLE {table}"));
+}
+
+#[test]
+fn float64_low_cardinality_single_row_writing() {
+    let server = ClickhouseServer::connect();
+    let table = unique_table("");
+    server.exec_with_settings(
+        &format!("CREATE TABLE {table} (value LowCardinality(Float64)) ENGINE=Memory"),
+        "allow_suspicious_low_cardinality_types=1",
+    );
+    let schema = Schema::from_type_strings(&[("value", "LowCardinality(Float64)")]).unwrap();
+
+    for format in FORMATS {
+        let insert_sql = format!("INSERT INTO {table} FORMAT {format}");
+        server.insert_rowbinary(&insert_sql, format, &schema, &[vec![Value::Float64(1.5)]]);
+        let json_rows = server.fetch_json(&format!("SELECT value FROM {table}"));
+        assert_eq!(json_rows, vec![json!({"value": 1.5})]);
+        server.exec(&format!("TRUNCATE TABLE {table}"));
+    }
+
+    server.exec(&format!("DROP TABLE {table}"));
+}
+
+#[test]
+fn float64_low_cardinality_multi_row_writing() {
+    let server = ClickhouseServer::connect();
+    let table = unique_table("");
+    server.exec_with_settings(
+        &format!("CREATE TABLE {table} (value LowCardinality(Float64)) ENGINE=Memory"),
+        "allow_suspicious_low_cardinality_types=1",
+    );
+    let schema = Schema::from_type_strings(&[("value", "LowCardinality(Float64)")]).unwrap();
+
+    for format in FORMATS {
+        let insert_sql = format!("INSERT INTO {table} FORMAT {format}");
+        server.insert_rowbinary(
+            &insert_sql,
+            format,
+            &schema,
+            &[vec![Value::Float64(1.5)], vec![Value::Float64(-2.25)]],
+        );
+        let json_rows = server.fetch_json(&format!("SELECT value FROM {table}"));
+        assert_eq!(
+            json_rows,
+            vec![json!({"value": 1.5}), json!({"value": -2.25})]
+        );
+        server.exec(&format!("TRUNCATE TABLE {table}"));
+    }
+
+    server.exec(&format!("DROP TABLE {table}"));
+}

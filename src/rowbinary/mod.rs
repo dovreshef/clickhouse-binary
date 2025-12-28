@@ -389,6 +389,7 @@ fn read_exact_or_eof<R: Read + ?Sized>(reader: &mut R, buf: &mut [u8]) -> Result
     }
 }
 
+#[allow(clippy::too_many_lines)]
 fn read_value_optional<R: Read + ?Sized>(ty: &TypeDesc, reader: &mut R) -> Result<Option<Value>> {
     match ty {
         TypeDesc::UInt8 => read_fixed::<_, _, 1>(reader, |bytes| Value::UInt8(bytes[0])),
@@ -470,6 +471,32 @@ fn read_value_optional<R: Read + ?Sized>(ty: &TypeDesc, reader: &mut R) -> Resul
                 Ok(Some(Value::Nullable(Some(Box::new(inner_value)))))
             }
         }
+        TypeDesc::LowCardinality(inner) => read_value_optional(inner, reader),
+        TypeDesc::Array(inner) => {
+            let Some(len) = read_uvarint(reader)? else {
+                return Ok(None);
+            };
+            let len =
+                usize::try_from(len).map_err(|_| Error::Overflow("array length too large"))?;
+            let mut values = Vec::with_capacity(len);
+            for _ in 0..len {
+                values.push(read_value_required(inner, reader)?);
+            }
+            Ok(Some(Value::Array(values)))
+        }
+        TypeDesc::Map { key, value } => {
+            let Some(len) = read_uvarint(reader)? else {
+                return Ok(None);
+            };
+            let len = usize::try_from(len).map_err(|_| Error::Overflow("map length too large"))?;
+            let mut entries = Vec::with_capacity(len);
+            for _ in 0..len {
+                let key_value = read_value_required(key, reader)?;
+                let value_value = read_value_required(value, reader)?;
+                entries.push((key_value, value_value));
+            }
+            Ok(Some(Value::Map(entries)))
+        }
     }
 }
 
@@ -532,6 +559,22 @@ fn write_value<W: Write + ?Sized>(ty: &TypeDesc, value: &Value, writer: &mut W) 
                 write_value(inner, inner_value, writer)?;
             } else {
                 writer.write_all(&[1])?;
+            }
+        }
+        (TypeDesc::LowCardinality(inner), value) => {
+            write_value(inner, value, writer)?;
+        }
+        (TypeDesc::Array(inner), Value::Array(values)) => {
+            write_uvarint(values.len() as u64, writer)?;
+            for item in values {
+                write_value(inner, item, writer)?;
+            }
+        }
+        (TypeDesc::Map { key, value }, Value::Map(entries)) => {
+            write_uvarint(entries.len() as u64, writer)?;
+            for (entry_key, entry_value) in entries {
+                write_value(key, entry_key, writer)?;
+                write_value(value, entry_value, writer)?;
             }
         }
         (ty, value) => {

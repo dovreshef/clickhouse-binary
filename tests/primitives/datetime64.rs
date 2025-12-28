@@ -209,3 +209,13 @@ fn datetime64_nullable_multi_row_writing() {
 
     server.exec(&format!("DROP TABLE {table}"));
 }
+
+#[test]
+fn datetime64_low_cardinality_is_rejected() {
+    let err = Schema::from_type_strings(&[("value", "LowCardinality(DateTime64(3))")])
+        .expect_err("expected schema parsing to reject LowCardinality(DateTime64)");
+    assert!(matches!(
+        err,
+        clickhouse_binary::Error::UnsupportedCombination(_)
+    ));
+}

@@ -175,3 +175,97 @@ fn uint8_nullable_multi_row_writing() {
 
     server.exec(&format!("DROP TABLE {table}"));
 }
+
+#[test]
+fn uint8_low_cardinality_single_row_reading() {
+    let server = ClickhouseServer::connect();
+    let table = unique_table("");
+    server.exec_with_settings(
+        &format!("CREATE TABLE {table} (value LowCardinality(UInt8)) ENGINE=Memory"),
+        "allow_suspicious_low_cardinality_types=1",
+    );
+    server.exec(&format!("INSERT INTO {table} VALUES (7)"));
+    let schema = Schema::from_type_strings(&[("value", "LowCardinality(UInt8)")]).unwrap();
+
+    for format in FORMATS {
+        let payload = server.fetch_rowbinary(&format!("SELECT value FROM {table}"), format);
+        let decoded = decode_rows(&payload, format, &schema);
+        assert_eq!(decoded, vec![vec![Value::UInt8(7)]]);
+    }
+
+    server.exec(&format!("DROP TABLE {table}"));
+}
+
+#[test]
+fn uint8_low_cardinality_multi_row_reading() {
+    let server = ClickhouseServer::connect();
+    let table = unique_table("");
+    server.exec_with_settings(
+        &format!("CREATE TABLE {table} (value LowCardinality(UInt8)) ENGINE=Memory"),
+        "allow_suspicious_low_cardinality_types=1",
+    );
+    server.exec(&format!("INSERT INTO {table} VALUES (7),(9),(7)"));
+    let schema = Schema::from_type_strings(&[("value", "LowCardinality(UInt8)")]).unwrap();
+
+    for format in FORMATS {
+        let payload = server.fetch_rowbinary(&format!("SELECT value FROM {table}"), format);
+        let decoded = decode_rows(&payload, format, &schema);
+        assert_eq!(
+            decoded,
+            vec![
+                vec![Value::UInt8(7)],
+                vec![Value::UInt8(9)],
+                vec![Value::UInt8(7)],
+            ]
+        );
+    }
+
+    server.exec(&format!("DROP TABLE {table}"));
+}
+
+#[test]
+fn uint8_low_cardinality_single_row_writing() {
+    let server = ClickhouseServer::connect();
+    let table = unique_table("");
+    server.exec_with_settings(
+        &format!("CREATE TABLE {table} (value LowCardinality(UInt8)) ENGINE=Memory"),
+        "allow_suspicious_low_cardinality_types=1",
+    );
+    let schema = Schema::from_type_strings(&[("value", "LowCardinality(UInt8)")]).unwrap();
+
+    for format in FORMATS {
+        let insert_sql = format!("INSERT INTO {table} FORMAT {format}");
+        server.insert_rowbinary(&insert_sql, format, &schema, &[vec![Value::UInt8(7)]]);
+        let json_rows = server.fetch_json(&format!("SELECT value FROM {table}"));
+        assert_eq!(json_rows, vec![json!({"value": 7})]);
+        server.exec(&format!("TRUNCATE TABLE {table}"));
+    }
+
+    server.exec(&format!("DROP TABLE {table}"));
+}
+
+#[test]
+fn uint8_low_cardinality_multi_row_writing() {
+    let server = ClickhouseServer::connect();
+    let table = unique_table("");
+    server.exec_with_settings(
+        &format!("CREATE TABLE {table} (value LowCardinality(UInt8)) ENGINE=Memory"),
+        "allow_suspicious_low_cardinality_types=1",
+    );
+    let schema = Schema::from_type_strings(&[("value", "LowCardinality(UInt8)")]).unwrap();
+
+    for format in FORMATS {
+        let insert_sql = format!("INSERT INTO {table} FORMAT {format}");
+        server.insert_rowbinary(
+            &insert_sql,
+            format,
+            &schema,
+            &[vec![Value::UInt8(7)], vec![Value::UInt8(9)]],
+        );
+        let json_rows = server.fetch_json(&format!("SELECT value FROM {table}"));
+        assert_eq!(json_rows, vec![json!({"value": 7}), json!({"value": 9})]);
+        server.exec(&format!("TRUNCATE TABLE {table}"));
+    }
+
+    server.exec(&format!("DROP TABLE {table}"));
+}

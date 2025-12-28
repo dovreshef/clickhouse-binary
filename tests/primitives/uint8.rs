@@ -372,3 +372,217 @@ fn uint8_array_multi_row_writing() {
         server.exec(&format!("TRUNCATE TABLE {table}"));
     }
 }
+
+#[test]
+fn uint8_array_nullable_single_row_reading() {
+    let server = ClickhouseServer::connect();
+    let table = unique_table("");
+    server.exec(&format!("DROP TABLE IF EXISTS {table}"));
+    server.exec(&format!(
+        "CREATE TABLE {table} (value Array(Nullable(UInt8))) ENGINE=Memory"
+    ));
+    server.exec(&format!("INSERT INTO {table} VALUES ([NULL,1])"));
+    let schema = Schema::from_type_strings(&[("value", "Array(Nullable(UInt8))")]).unwrap();
+
+    for format in FORMATS {
+        let payload = server.fetch_rowbinary(&format!("SELECT value FROM {table}"), format);
+        let decoded = decode_rows(&payload, format, &schema);
+        assert_eq!(
+            decoded,
+            vec![vec![Value::Array(vec![
+                Value::Nullable(None),
+                Value::Nullable(Some(Box::new(Value::UInt8(1)))),
+            ])]]
+        );
+    }
+}
+
+#[test]
+fn uint8_array_nullable_multi_row_reading() {
+    let server = ClickhouseServer::connect();
+    let table = unique_table("");
+    server.exec(&format!("DROP TABLE IF EXISTS {table}"));
+    server.exec(&format!(
+        "CREATE TABLE {table} (value Array(Nullable(UInt8))) ENGINE=Memory"
+    ));
+    server.exec(&format!("INSERT INTO {table} VALUES ([NULL,1]),([])"));
+    let schema = Schema::from_type_strings(&[("value", "Array(Nullable(UInt8))")]).unwrap();
+
+    for format in FORMATS {
+        let payload = server.fetch_rowbinary(&format!("SELECT value FROM {table}"), format);
+        let decoded = decode_rows(&payload, format, &schema);
+        assert_eq!(
+            decoded,
+            vec![
+                vec![Value::Array(vec![
+                    Value::Nullable(None),
+                    Value::Nullable(Some(Box::new(Value::UInt8(1)))),
+                ])],
+                vec![Value::Array(Vec::new())],
+            ]
+        );
+    }
+}
+
+#[test]
+fn uint8_array_nullable_single_row_writing() {
+    let server = ClickhouseServer::connect();
+    let table = unique_table("");
+    server.exec(&format!("DROP TABLE IF EXISTS {table}"));
+    server.exec(&format!(
+        "CREATE TABLE {table} (value Array(Nullable(UInt8))) ENGINE=Memory"
+    ));
+    let schema = Schema::from_type_strings(&[("value", "Array(Nullable(UInt8))")]).unwrap();
+
+    for format in FORMATS {
+        let insert_sql = format!("INSERT INTO {table} FORMAT {format}");
+        server.insert_rowbinary(
+            &insert_sql,
+            format,
+            &schema,
+            &[vec![Value::Array(vec![
+                Value::Nullable(None),
+                Value::Nullable(Some(Box::new(Value::UInt8(1)))),
+            ])]],
+        );
+        let json_rows = server.fetch_json(&format!("SELECT value FROM {table}"));
+        assert_eq!(json_rows, vec![json!({"value": [null, 1]})]);
+        server.exec(&format!("TRUNCATE TABLE {table}"));
+    }
+}
+
+#[test]
+fn uint8_array_nullable_multi_row_writing() {
+    let server = ClickhouseServer::connect();
+    let table = unique_table("");
+    server.exec(&format!("DROP TABLE IF EXISTS {table}"));
+    server.exec(&format!(
+        "CREATE TABLE {table} (value Array(Nullable(UInt8))) ENGINE=Memory"
+    ));
+    let schema = Schema::from_type_strings(&[("value", "Array(Nullable(UInt8))")]).unwrap();
+
+    for format in FORMATS {
+        let insert_sql = format!("INSERT INTO {table} FORMAT {format}");
+        server.insert_rowbinary(
+            &insert_sql,
+            format,
+            &schema,
+            &[
+                vec![Value::Array(vec![
+                    Value::Nullable(None),
+                    Value::Nullable(Some(Box::new(Value::UInt8(1)))),
+                ])],
+                vec![Value::Array(Vec::new())],
+            ],
+        );
+        let json_rows = server.fetch_json(&format!("SELECT value FROM {table}"));
+        assert_eq!(
+            json_rows,
+            vec![json!({"value": [null, 1 ]}), json!({"value": []})]
+        );
+        server.exec(&format!("TRUNCATE TABLE {table}"));
+    }
+}
+
+#[test]
+fn uint8_array_low_cardinality_single_row_reading() {
+    let server = ClickhouseServer::connect();
+    let table = unique_table("");
+    server.exec(&format!("DROP TABLE IF EXISTS {table}"));
+    server.exec_with_settings(
+        &format!("CREATE TABLE {table} (value Array(LowCardinality(UInt8))) ENGINE=Memory"),
+        "allow_suspicious_low_cardinality_types=1",
+    );
+    server.exec(&format!("INSERT INTO {table} VALUES ([1,2])"));
+    let schema = Schema::from_type_strings(&[("value", "Array(LowCardinality(UInt8))")]).unwrap();
+
+    for format in FORMATS {
+        let payload = server.fetch_rowbinary(&format!("SELECT value FROM {table}"), format);
+        let decoded = decode_rows(&payload, format, &schema);
+        assert_eq!(
+            decoded,
+            vec![vec![Value::Array(vec![Value::UInt8(1), Value::UInt8(2)])]]
+        );
+    }
+}
+
+#[test]
+fn uint8_array_low_cardinality_multi_row_reading() {
+    let server = ClickhouseServer::connect();
+    let table = unique_table("");
+    server.exec(&format!("DROP TABLE IF EXISTS {table}"));
+    server.exec_with_settings(
+        &format!("CREATE TABLE {table} (value Array(LowCardinality(UInt8))) ENGINE=Memory"),
+        "allow_suspicious_low_cardinality_types=1",
+    );
+    server.exec(&format!("INSERT INTO {table} VALUES ([1,2]),([])"));
+    let schema = Schema::from_type_strings(&[("value", "Array(LowCardinality(UInt8))")]).unwrap();
+
+    for format in FORMATS {
+        let payload = server.fetch_rowbinary(&format!("SELECT value FROM {table}"), format);
+        let decoded = decode_rows(&payload, format, &schema);
+        assert_eq!(
+            decoded,
+            vec![
+                vec![Value::Array(vec![Value::UInt8(1), Value::UInt8(2)])],
+                vec![Value::Array(Vec::new())],
+            ]
+        );
+    }
+}
+
+#[test]
+fn uint8_array_low_cardinality_single_row_writing() {
+    let server = ClickhouseServer::connect();
+    let table = unique_table("");
+    server.exec(&format!("DROP TABLE IF EXISTS {table}"));
+    server.exec_with_settings(
+        &format!("CREATE TABLE {table} (value Array(LowCardinality(UInt8))) ENGINE=Memory"),
+        "allow_suspicious_low_cardinality_types=1",
+    );
+    let schema = Schema::from_type_strings(&[("value", "Array(LowCardinality(UInt8))")]).unwrap();
+
+    for format in FORMATS {
+        let insert_sql = format!("INSERT INTO {table} FORMAT {format}");
+        server.insert_rowbinary(
+            &insert_sql,
+            format,
+            &schema,
+            &[vec![Value::Array(vec![Value::UInt8(1), Value::UInt8(2)])]],
+        );
+        let json_rows = server.fetch_json(&format!("SELECT value FROM {table}"));
+        assert_eq!(json_rows, vec![json!({"value": [1, 2]})]);
+        server.exec(&format!("TRUNCATE TABLE {table}"));
+    }
+}
+
+#[test]
+fn uint8_array_low_cardinality_multi_row_writing() {
+    let server = ClickhouseServer::connect();
+    let table = unique_table("");
+    server.exec(&format!("DROP TABLE IF EXISTS {table}"));
+    server.exec_with_settings(
+        &format!("CREATE TABLE {table} (value Array(LowCardinality(UInt8))) ENGINE=Memory"),
+        "allow_suspicious_low_cardinality_types=1",
+    );
+    let schema = Schema::from_type_strings(&[("value", "Array(LowCardinality(UInt8))")]).unwrap();
+
+    for format in FORMATS {
+        let insert_sql = format!("INSERT INTO {table} FORMAT {format}");
+        server.insert_rowbinary(
+            &insert_sql,
+            format,
+            &schema,
+            &[
+                vec![Value::Array(vec![Value::UInt8(1), Value::UInt8(2)])],
+                vec![Value::Array(Vec::new())],
+            ],
+        );
+        let json_rows = server.fetch_json(&format!("SELECT value FROM {table}"));
+        assert_eq!(
+            json_rows,
+            vec![json!({"value": [1, 2]}), json!({"value": []})]
+        );
+        server.exec(&format!("TRUNCATE TABLE {table}"));
+    }
+}

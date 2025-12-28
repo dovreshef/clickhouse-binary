@@ -158,10 +158,11 @@ pub fn parse_type_desc(input: &str) -> Result<TypeDesc> {
                         "LowCardinality(LowCardinality(T)) is unsupported".into(),
                     ));
                 }
-                if matches!(desc, TypeDesc::DateTime64 { .. }) {
-                    return Err(Error::UnsupportedCombination(
-                        "LowCardinality(DateTime64) is unsupported".into(),
-                    ));
+                if !can_be_inside_low_cardinality(&desc) {
+                    return Err(Error::UnsupportedCombination(format!(
+                        "LowCardinality({}) is unsupported",
+                        desc.type_name()
+                    )));
                 }
                 return Ok(TypeDesc::LowCardinality(Box::new(desc)));
             }
@@ -189,6 +190,12 @@ pub fn parse_type_desc(input: &str) -> Result<TypeDesc> {
                     .strip_suffix(')')
                     .ok_or(Error::InvalidValue("unterminated Map type"))?;
                 let (key, value) = parse_map_descriptor(inner)?;
+                if !is_valid_map_key(&key) {
+                    return Err(Error::UnsupportedCombination(format!(
+                        "Map cannot have a key of type {}",
+                        key.type_name()
+                    )));
+                }
                 return Ok(TypeDesc::Map {
                     key: Box::new(key),
                     value: Box::new(value),
@@ -228,6 +235,42 @@ pub fn parse_type_desc(input: &str) -> Result<TypeDesc> {
             }
             Err(Error::UnsupportedType(trimmed.to_string()))
         }
+    }
+}
+
+fn can_be_inside_low_cardinality(desc: &TypeDesc) -> bool {
+    match desc {
+        TypeDesc::UInt8
+        | TypeDesc::UInt16
+        | TypeDesc::UInt32
+        | TypeDesc::UInt64
+        | TypeDesc::Int8
+        | TypeDesc::Int16
+        | TypeDesc::Int32
+        | TypeDesc::Int64
+        | TypeDesc::Float32
+        | TypeDesc::Float64
+        | TypeDesc::String
+        | TypeDesc::FixedString { .. }
+        | TypeDesc::Date
+        | TypeDesc::Date32
+        | TypeDesc::DateTime { .. }
+        | TypeDesc::Uuid
+        | TypeDesc::Ipv4
+        | TypeDesc::Ipv6 => true,
+        TypeDesc::Nullable(inner) => can_be_inside_low_cardinality(inner),
+        TypeDesc::LowCardinality(_)
+        | TypeDesc::Array(_)
+        | TypeDesc::Map { .. }
+        | TypeDesc::DateTime64 { .. } => false,
+    }
+}
+
+fn is_valid_map_key(desc: &TypeDesc) -> bool {
+    match desc {
+        TypeDesc::Nullable(_) => false,
+        TypeDesc::LowCardinality(inner) => !matches!(inner.as_ref(), TypeDesc::Nullable(_)),
+        _ => true,
     }
 }
 
@@ -278,4 +321,25 @@ fn parse_map_descriptor(input: &str) -> Result<(TypeDesc, TypeDesc)> {
     let key = parse_type_desc(left.trim())?;
     let value = parse_type_desc(right[1..].trim())?;
     Ok((key, value))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rejects_low_cardinality_of_unsupported_types() {
+        let err = parse_type_desc("LowCardinality(DateTime64(3))").unwrap_err();
+        assert!(matches!(err, Error::UnsupportedCombination(_)));
+        let err = parse_type_desc("LowCardinality(Array(UInt8))").unwrap_err();
+        assert!(matches!(err, Error::UnsupportedCombination(_)));
+    }
+
+    #[test]
+    fn rejects_map_keys_that_are_nullable() {
+        let err = parse_type_desc("Map(Nullable(UInt8), UInt8)").unwrap_err();
+        assert!(matches!(err, Error::UnsupportedCombination(_)));
+        let err = parse_type_desc("Map(LowCardinality(Nullable(String)), UInt8)").unwrap_err();
+        assert!(matches!(err, Error::UnsupportedCombination(_)));
+    }
 }

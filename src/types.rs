@@ -116,6 +116,11 @@ pub enum TypeDesc {
     Tuple(Vec<TupleItem>),
     /// Nested type (Array of Tuple) with named elements.
     Nested(Vec<TupleItem>),
+    /// Dynamic value storing per-row type info.
+    Dynamic {
+        /// Optional max dynamic types setting.
+        max_types: Option<u8>,
+    },
 }
 
 /// Named tuple element (name is optional).
@@ -195,6 +200,10 @@ impl TypeDesc {
             }
             TypeDesc::Tuple(items) => format!("Tuple({})", format_tuple_items(items)),
             TypeDesc::Nested(items) => format!("Nested({})", format_tuple_items(items)),
+            TypeDesc::Dynamic { max_types } => match max_types {
+                Some(max_types) => format!("Dynamic(max_types={max_types})"),
+                None => "Dynamic".into(),
+            },
         }
     }
 }
@@ -237,6 +246,7 @@ pub fn parse_type_desc(input: &str) -> Result<TypeDesc> {
         "UUID" => Ok(TypeDesc::Uuid),
         "IPv4" => Ok(TypeDesc::Ipv4),
         "IPv6" => Ok(TypeDesc::Ipv6),
+        "Dynamic" => Ok(TypeDesc::Dynamic { max_types: None }),
         _ => {
             if let Some(inner) = trimmed.strip_prefix("Decimal(") {
                 let inner = inner
@@ -299,6 +309,34 @@ pub fn parse_type_desc(input: &str) -> Result<TypeDesc> {
                     .ok_or(Error::InvalidValue("unterminated Enum16 type"))?;
                 let values = parse_enum_variants(inner, EnumStorage::Enum16)?;
                 return Ok(TypeDesc::Enum16(values));
+            }
+            if let Some(inner) = trimmed.strip_prefix("Dynamic(") {
+                let inner = inner
+                    .strip_suffix(')')
+                    .ok_or(Error::InvalidValue("unterminated Dynamic type"))?;
+                let mut parts = inner.splitn(2, '=');
+                let key = parts
+                    .next()
+                    .ok_or(Error::InvalidValue("Dynamic expects max_types=N"))?
+                    .trim();
+                let value = parts
+                    .next()
+                    .ok_or(Error::InvalidValue("Dynamic expects max_types=N"))?
+                    .trim();
+                if key != "max_types" {
+                    return Err(Error::InvalidValue("Dynamic expects max_types=N"));
+                }
+                let max_types: u64 = value
+                    .parse()
+                    .map_err(|_| Error::InvalidValue("invalid Dynamic max_types"))?;
+                if max_types > u64::from(u8::MAX) {
+                    return Err(Error::InvalidValue("Dynamic max_types out of range"));
+                }
+                let max_types = u8::try_from(max_types)
+                    .map_err(|_| Error::InvalidValue("Dynamic max_types out of range"))?;
+                return Ok(TypeDesc::Dynamic {
+                    max_types: Some(max_types),
+                });
             }
             if let Some(inner) = trimmed.strip_prefix("LowCardinality(") {
                 let inner = inner
@@ -409,7 +447,7 @@ pub fn parse_type_desc(input: &str) -> Result<TypeDesc> {
     }
 }
 
-fn can_be_inside_low_cardinality(desc: &TypeDesc) -> bool {
+pub(crate) fn can_be_inside_low_cardinality(desc: &TypeDesc) -> bool {
     match desc {
         TypeDesc::UInt8
         | TypeDesc::Bool
@@ -440,6 +478,7 @@ fn can_be_inside_low_cardinality(desc: &TypeDesc) -> bool {
         | TypeDesc::Map { .. }
         | TypeDesc::Tuple(_)
         | TypeDesc::Nested(_)
+        | TypeDesc::Dynamic { .. }
         | TypeDesc::DateTime64 { .. }
         | TypeDesc::Decimal { .. }
         | TypeDesc::Decimal32 { .. }
@@ -451,7 +490,7 @@ fn can_be_inside_low_cardinality(desc: &TypeDesc) -> bool {
     }
 }
 
-fn is_valid_map_key(desc: &TypeDesc) -> bool {
+pub(crate) fn is_valid_map_key(desc: &TypeDesc) -> bool {
     match desc {
         TypeDesc::Nullable(_) => false,
         TypeDesc::LowCardinality(inner) => !matches!(inner.as_ref(), TypeDesc::Nullable(_)),
@@ -880,5 +919,19 @@ mod tests {
     fn rejects_low_cardinality_tuple() {
         let err = parse_type_desc("LowCardinality(Tuple(UInt8, String))").unwrap_err();
         assert!(matches!(err, Error::UnsupportedCombination(_)));
+    }
+
+    #[test]
+    fn parses_dynamic_types() {
+        assert_eq!(
+            parse_type_desc("Dynamic").unwrap(),
+            TypeDesc::Dynamic { max_types: None }
+        );
+        assert_eq!(
+            parse_type_desc("Dynamic(max_types=12)").unwrap(),
+            TypeDesc::Dynamic {
+                max_types: Some(12)
+            }
+        );
     }
 }

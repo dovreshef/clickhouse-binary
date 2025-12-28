@@ -3,6 +3,7 @@
 mod format;
 mod reader;
 mod schema;
+mod type_binary;
 mod value_rw;
 mod writer;
 

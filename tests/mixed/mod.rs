@@ -1,6 +1,6 @@
 use std::net::{Ipv4Addr, Ipv6Addr};
 
-use clickhouse_binary::{Row, RowBinaryFormat, Schema, Value};
+use clickhouse_binary::{Row, RowBinaryFormat, Schema, TypeDesc, Value};
 use uuid::Uuid;
 
 use crate::common::{ClickhouseServer, decode_rows, unique_table};
@@ -98,6 +98,43 @@ fn create_mixed_table(server: &ClickhouseServer, table: &str) {
     ));
 }
 
+fn mixed_dynamic_schema() -> Schema {
+    Schema::from_type_strings(&[("id", "UInt64"), ("value", "Dynamic"), ("note", "String")])
+        .unwrap()
+}
+
+fn mixed_dynamic_rows() -> (Row, Row, Row) {
+    let first = vec![
+        Value::UInt64(1),
+        Value::Dynamic {
+            ty: TypeDesc::UInt8,
+            value: Box::new(Value::UInt8(7)),
+        },
+        Value::String(b"alpha".to_vec()),
+    ];
+    let second = vec![
+        Value::UInt64(2),
+        Value::Dynamic {
+            ty: TypeDesc::String,
+            value: Box::new(Value::String(b"beta".to_vec())),
+        },
+        Value::String(b"gamma".to_vec()),
+    ];
+    let third = vec![
+        Value::UInt64(3),
+        Value::DynamicNull,
+        Value::String(b"none".to_vec()),
+    ];
+    (first, second, third)
+}
+
+fn create_mixed_dynamic_table(server: &ClickhouseServer, table: &str) {
+    server.exec(&format!("DROP TABLE IF EXISTS {table}"));
+    server.exec(&format!(
+        "CREATE TABLE {table} (id UInt64, value Dynamic, note String) ENGINE=Memory"
+    ));
+}
+
 #[test]
 fn mixed_schema_single_row_reading() {
     let server = ClickhouseServer::connect();
@@ -174,6 +211,50 @@ fn mixed_schema_multi_row_writing() {
         let payload = server.fetch_rowbinary(&format!("SELECT * FROM {table}"), format);
         let decoded = decode_rows(&payload, format, &schema);
         assert_eq!(decoded, vec![first.clone(), second.clone()]);
+        server.exec(&format!("TRUNCATE TABLE {table}"));
+    }
+}
+
+#[test]
+fn mixed_dynamic_schema_reading() {
+    let server = ClickhouseServer::connect();
+    let table = unique_table("");
+    create_mixed_dynamic_table(&server, &table);
+    server.exec(&format!(
+        "INSERT INTO {table} VALUES \
+        (1, CAST(7 AS UInt8), 'alpha'),\
+        (2, CAST('beta' AS String), 'gamma'),\
+        (3, CAST(NULL AS Nullable(UInt8)), 'none')"
+    ));
+    let schema = mixed_dynamic_schema();
+    let (first, second, third) = mixed_dynamic_rows();
+
+    for format in FORMATS {
+        let payload = server.fetch_rowbinary(&format!("SELECT * FROM {table}"), format);
+        let decoded = decode_rows(&payload, format, &schema);
+        assert_eq!(decoded, vec![first.clone(), second.clone(), third.clone()]);
+    }
+}
+
+#[test]
+fn mixed_dynamic_schema_writing() {
+    let server = ClickhouseServer::connect();
+    let table = unique_table("");
+    create_mixed_dynamic_table(&server, &table);
+    let schema = mixed_dynamic_schema();
+    let (first, second, third) = mixed_dynamic_rows();
+
+    for format in FORMATS {
+        let insert_sql = format!("INSERT INTO {table} FORMAT {format}");
+        server.insert_rowbinary(
+            &insert_sql,
+            format,
+            &schema,
+            &[first.clone(), second.clone(), third.clone()],
+        );
+        let payload = server.fetch_rowbinary(&format!("SELECT * FROM {table}"), format);
+        let decoded = decode_rows(&payload, format, &schema);
+        assert_eq!(decoded, vec![first.clone(), second.clone(), third.clone()]);
         server.exec(&format!("TRUNCATE TABLE {table}"));
     }
 }

@@ -72,6 +72,36 @@ For tighter control over allocations, keep a reusable `Vec<u8>` per batch,
 If your HTTP client supports streaming request bodies, you can write directly
 into the request stream instead of buffering the entire batch.
 
+## Dynamic values
+
+`Dynamic` values encode the concrete type before each value using ClickHouse's
+binary type encoding. Use `Value::Dynamic` with an explicit `TypeDesc`, or
+`Value::DynamicNull` to emit `Nothing`.
+
+Note: when Dynamic values are produced by ClickHouse SQL casts, `Nested` is
+encoded as `Array(Tuple(...))`, so the decoded `TypeDesc` will be that array
+form rather than `Nested`.
+
+```rust
+use clickhouse_binary::{RowBinaryFormat, RowBinaryWriter, Schema, TypeDesc, Value};
+
+let schema = Schema::from_type_strings(&[("value", "Dynamic")])?;
+let mut writer = RowBinaryWriter::new(Vec::new(), RowBinaryFormat::RowBinary, schema);
+writer.write_rows(&[
+    vec![Value::Dynamic {
+        ty: TypeDesc::UInt8,
+        value: Box::new(Value::UInt8(7)),
+    }],
+    vec![Value::Dynamic {
+        ty: TypeDesc::String,
+        value: Box::new(Value::String(b"alpha".to_vec())),
+    }],
+    vec![Value::DynamicNull],
+])?;
+let payload = writer.into_inner();
+// INSERT INTO table FORMAT RowBinary
+```
+
 ## Writing Nested columns
 
 ClickHouse expands `Nested` columns into separate `Array(T)` columns on write

@@ -4,6 +4,8 @@ use std::net::{Ipv4Addr, Ipv6Addr};
 
 use uuid::Uuid;
 
+use crate::types::TypeDesc;
+
 /// Runtime value used for `RowBinary` read/write APIs.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Value {
@@ -75,6 +77,15 @@ pub enum Value {
     Map(Vec<(Value, Value)>),
     /// Tuple represented as ordered values.
     Tuple(Vec<Value>),
+    /// Dynamic value with an explicit runtime type.
+    Dynamic {
+        /// The concrete type encoded for this value.
+        ty: TypeDesc,
+        /// The concrete value payload.
+        value: Box<Value>,
+    },
+    /// Dynamic NULL (encoded as `Nothing` with no payload).
+    DynamicNull,
 }
 
 impl Value {
@@ -116,6 +127,7 @@ impl Value {
             Value::Array(_) => "Array",
             Value::Map(_) => "Map",
             Value::Tuple(_) => "Tuple",
+            Value::Dynamic { .. } | Value::DynamicNull => "Dynamic",
         }
     }
 }
@@ -195,5 +207,16 @@ impl From<&str> for Value {
 impl From<Vec<u8>> for Value {
     fn from(value: Vec<u8>) -> Self {
         Value::String(value)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Value;
+    use std::mem::size_of;
+
+    #[test]
+    fn value_size_is_stable() {
+        assert_eq!(size_of::<Value>(), 48);
     }
 }

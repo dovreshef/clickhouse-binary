@@ -14,6 +14,8 @@ use crate::{
     value::Value,
 };
 
+use super::type_binary::{decode_type_binary_from_tag, encode_type_binary_option};
+
 pub(crate) fn read_value_required<R: Read + ?Sized>(
     ty: &TypeDesc,
     reader: &mut R,
@@ -223,6 +225,21 @@ pub(crate) fn read_value_optional<R: Read + ?Sized>(
             }
             Ok(Some(Value::Array(values)))
         }
+        TypeDesc::Dynamic { .. } => {
+            let mut tag = [0_u8; 1];
+            if read_exact_or_eof(reader, &mut tag)? {
+                return Ok(None);
+            }
+            let ty = decode_type_binary_from_tag(tag[0], reader)?;
+            let Some(ty) = ty else {
+                return Ok(Some(Value::DynamicNull));
+            };
+            let value = read_value_required(&ty, reader)?;
+            Ok(Some(Value::Dynamic {
+                ty,
+                value: Box::new(value),
+            }))
+        }
     }
 }
 
@@ -366,6 +383,19 @@ pub(crate) fn write_value<W: Write + ?Sized>(
                 };
                 write_tuple_values(items, values, writer)?;
             }
+        }
+        (TypeDesc::Dynamic { .. }, Value::DynamicNull)
+        | (TypeDesc::Dynamic { .. }, Value::Nullable(None)) => {
+            encode_type_binary_option(None, writer)?;
+        }
+        (TypeDesc::Dynamic { .. }, Value::Dynamic { ty, value }) => {
+            if matches!(ty, TypeDesc::Dynamic { .. }) {
+                return Err(Error::UnsupportedCombination(
+                    "Dynamic value cannot be Dynamic".into(),
+                ));
+            }
+            encode_type_binary_option(Some(ty), writer)?;
+            write_value(ty, value, writer)?;
         }
         (ty, value) => {
             return Err(Error::TypeMismatch {

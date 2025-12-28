@@ -41,7 +41,7 @@ Currently supported:
 - `Date`, `Date32`, `DateTime`, `DateTime64`.
 - `UUID`, `IPv4`, `IPv6`.
 - `Nullable(T)`, `Array(T)`, `Map(K, V)`, `LowCardinality(T)`.
-- `Tuple(...)`, `Nested(...)`.
+- `Tuple(...)`, `Nested(...)`, `Dynamic`.
 
 Validation mirrors ClickHouse rules where applicable:
 - `LowCardinality` is only allowed for types ClickHouse accepts (numbers, string
@@ -49,7 +49,10 @@ Validation mirrors ClickHouse rules where applicable:
   those). `LowCardinality(DateTime64)` and nested low-cardinality are rejected.
 - `Map` keys cannot be `Nullable` or `LowCardinality(Nullable(...))`.
 
-Dynamic and JSON v3 RowBinary encodings are planned but not implemented yet.
+JSON v3 RowBinary encodings are planned but not implemented yet.
+
+Dynamic values embed the concrete type inline using ClickHouse binary type
+encoding; use `Value::Dynamic`/`Value::DynamicNull` when writing.
 
 ## Codec Notes
 

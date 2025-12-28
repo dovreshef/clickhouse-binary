@@ -103,7 +103,18 @@ pub enum TypeDesc {
         value: Box<TypeDesc>,
     },
     /// Tuple of ordered values.
-    Tuple(Vec<TypeDesc>),
+    Tuple(Vec<TupleItem>),
+    /// Nested type (Array of Tuple) with named elements.
+    Nested(Vec<TupleItem>),
+}
+
+/// Named tuple element (name is optional).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TupleItem {
+    /// Optional element name.
+    pub name: Option<String>,
+    /// Element type.
+    pub ty: TypeDesc,
 }
 
 /// Backing storage size for Decimal types.
@@ -167,14 +178,8 @@ impl TypeDesc {
             TypeDesc::Map { key, value } => {
                 format!("Map({}, {})", key.type_name(), value.type_name())
             }
-            TypeDesc::Tuple(items) => format!(
-                "Tuple({})",
-                items
-                    .iter()
-                    .map(TypeDesc::type_name)
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ),
+            TypeDesc::Tuple(items) => format!("Tuple({})", format_tuple_items(items)),
+            TypeDesc::Nested(items) => format!("Nested({})", format_tuple_items(items)),
         }
     }
 }
@@ -340,6 +345,13 @@ pub fn parse_type_desc(input: &str) -> Result<TypeDesc> {
                 let items = parse_tuple_descriptor(inner)?;
                 return Ok(TypeDesc::Tuple(items));
             }
+            if let Some(inner) = trimmed.strip_prefix("Nested(") {
+                let inner = inner
+                    .strip_suffix(')')
+                    .ok_or(Error::InvalidValue("unterminated Nested type"))?;
+                let items = parse_nested_descriptor(inner)?;
+                return Ok(TypeDesc::Nested(items));
+            }
             if let Some(inner) = trimmed.strip_prefix("DateTime(") {
                 let inner = inner
                     .strip_suffix(')')
@@ -402,6 +414,7 @@ fn can_be_inside_low_cardinality(desc: &TypeDesc) -> bool {
         | TypeDesc::Array(_)
         | TypeDesc::Map { .. }
         | TypeDesc::Tuple(_)
+        | TypeDesc::Nested(_)
         | TypeDesc::DateTime64 { .. }
         | TypeDesc::Decimal { .. }
         | TypeDesc::Decimal32 { .. }
@@ -470,17 +483,33 @@ fn parse_map_descriptor(input: &str) -> Result<(TypeDesc, TypeDesc)> {
     Ok((key, value))
 }
 
-fn parse_tuple_descriptor(input: &str) -> Result<Vec<TypeDesc>> {
+fn parse_tuple_descriptor(input: &str) -> Result<Vec<TupleItem>> {
     let items = split_top_level_commas_with_parens(input);
     if items.is_empty() {
         return Err(Error::InvalidValue("Tuple expects at least one type"));
     }
     let mut types = Vec::with_capacity(items.len());
     for item in items {
-        let desc = parse_type_desc(item)?;
-        types.push(desc);
+        let item = parse_tuple_item(item)?;
+        types.push(item);
     }
     Ok(types)
+}
+
+fn parse_nested_descriptor(input: &str) -> Result<Vec<TupleItem>> {
+    let items = split_top_level_commas_with_parens(input);
+    if items.is_empty() {
+        return Err(Error::InvalidValue("Nested expects at least one element"));
+    }
+    let mut fields = Vec::with_capacity(items.len());
+    for item in items {
+        let field = parse_tuple_item(item)?;
+        if field.name.is_none() {
+            return Err(Error::InvalidValue("Nested field must have a name"));
+        }
+        fields.push(field);
+    }
+    Ok(fields)
 }
 
 fn parse_decimal_precision_scale(input: &str) -> Result<(u8, u8)> {
@@ -677,6 +706,93 @@ fn split_top_level_commas_with_parens(input: &str) -> Vec<&str> {
         }
     }
     entries
+}
+
+fn parse_tuple_item(input: &str) -> Result<TupleItem> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return Err(Error::InvalidValue("Tuple element cannot be empty"));
+    }
+    if let Some((name, ty)) = split_name_and_type(trimmed)? {
+        return Ok(TupleItem {
+            name: Some(parse_identifier(name)?),
+            ty: parse_type_desc(ty)?,
+        });
+    }
+    Ok(TupleItem {
+        name: None,
+        ty: parse_type_desc(trimmed)?,
+    })
+}
+
+fn split_name_and_type(input: &str) -> Result<Option<(&str, &str)>> {
+    let mut in_quote = false;
+    let mut escape = false;
+    let mut depth = 0_i32;
+    for (idx, ch) in input.char_indices() {
+        if escape {
+            escape = false;
+            continue;
+        }
+        match ch {
+            '\\' if in_quote => escape = true,
+            '\'' => in_quote = !in_quote,
+            '(' if !in_quote => depth += 1,
+            ')' if !in_quote => depth -= 1,
+            ch if ch.is_whitespace() && !in_quote && depth == 0 => {
+                let (left, right) = input.split_at(idx);
+                let name = left.trim();
+                let ty = right.trim();
+                if name.is_empty() || ty.is_empty() {
+                    return Err(Error::InvalidValue("Tuple element name/type missing"));
+                }
+                return Ok(Some((name, ty)));
+            }
+            _ => {}
+        }
+    }
+    Ok(None)
+}
+
+fn parse_identifier(input: &str) -> Result<String> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return Err(Error::InvalidValue("empty identifier"));
+    }
+    let unquoted = if (trimmed.starts_with('`') && trimmed.ends_with('`'))
+        || (trimmed.starts_with('"') && trimmed.ends_with('"'))
+    {
+        &trimmed[1..trimmed.len() - 1]
+    } else {
+        trimmed
+    };
+    if unquoted.is_empty() {
+        return Err(Error::InvalidValue("empty identifier"));
+    }
+    Ok(unquoted.to_string())
+}
+
+fn format_tuple_items(items: &[TupleItem]) -> String {
+    items
+        .iter()
+        .map(|item| match &item.name {
+            Some(name) => format!("{} {}", format_identifier(name), item.ty.type_name()),
+            None => item.ty.type_name(),
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn format_identifier(name: &str) -> String {
+    let simple = name
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || ch == '_');
+    if simple && !name.is_empty() {
+        name.to_string()
+    } else {
+        let escaped = name.replace('`', "``");
+        format!("`{escaped}`")
+    }
 }
 
 fn format_enum<T: fmt::Display>(prefix: &str, values: &[(String, T)]) -> String {

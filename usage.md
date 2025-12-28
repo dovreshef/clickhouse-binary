@@ -70,6 +70,26 @@ if count > 0 {
 For tighter control over allocations, keep a reusable `Vec<u8>` per batch,
 `clear()` it after sending, and pass it into each new `RowBinaryWriter`.
 
+## Writing Nested columns
+
+ClickHouse expands `Nested` columns into separate `Array(T)` columns on write
+(`n.a`, `n.b`, ...). The writer handles this for you: supply a `Nested` schema
+and pass `Value::Array(Vec<Value::Tuple>)` for the column value. The writer
+will emit `n.a`, `n.b` payloads in the expected order.
+
+```rust
+use clickhouse_binary::{RowBinaryFormat, RowBinaryWriter, Schema, Value};
+
+let schema = Schema::from_type_strings(&[("n", "Nested(a UInt8, b String)")])?;
+let mut writer = RowBinaryWriter::new(Vec::new(), RowBinaryFormat::RowBinary, schema);
+writer.write_row(&[Value::Array(vec![
+    Value::Tuple(vec![Value::UInt8(7), Value::String(b"alpha".to_vec())]),
+    Value::Tuple(vec![Value::UInt8(9), Value::String(b"beta".to_vec())]),
+])])?;
+let payload = writer.into_inner();
+// INSERT INTO table FORMAT RowBinary
+```
+
 ## Combine per-thread RowBinary chunks into one ZSTD file
 
 Workers can emit **plain RowBinary** (no header) and a single aggregator writes

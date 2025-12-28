@@ -41,7 +41,7 @@ Currently supported:
 - `Date`, `Date32`, `DateTime`, `DateTime64`.
 - `UUID`, `IPv4`, `IPv6`.
 - `Nullable(T)`, `Array(T)`, `Map(K, V)`, `LowCardinality(T)`.
-- `Tuple(...)`.
+- `Tuple(...)`, `Nested(...)`.
 
 Validation mirrors ClickHouse rules where applicable:
 - `LowCardinality` is only allowed for types ClickHouse accepts (numbers, string

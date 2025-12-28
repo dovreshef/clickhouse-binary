@@ -422,7 +422,42 @@ fn string_codec_zstd_reading_writing() {
     )) {
         return;
     }
+    // CODEC is storage-only; RowBinary headers still use plain `String`.
     let schema = Schema::from_type_strings(&[("value", "String")]).unwrap();
+
+    for format in FORMATS {
+        server.exec(&format!("INSERT INTO {table} VALUES ('alpha')"));
+        let payload = server.fetch_rowbinary(&format!("SELECT value FROM {table}"), format);
+        let decoded = decode_rows(&payload, format, &schema);
+        assert_eq!(decoded, vec![vec![Value::String(b"alpha".to_vec())]]);
+        server.exec(&format!("TRUNCATE TABLE {table}"));
+
+        let insert_sql = format!("INSERT INTO {table} FORMAT {format}");
+        server.insert_rowbinary(
+            &insert_sql,
+            format,
+            &schema,
+            &[vec![Value::String(b"alpha".to_vec())]],
+        );
+        let payload = server.fetch_rowbinary(&format!("SELECT value FROM {table}"), format);
+        let decoded = decode_rows(&payload, format, &schema);
+        assert_eq!(decoded, vec![vec![Value::String(b"alpha".to_vec())]]);
+        server.exec(&format!("TRUNCATE TABLE {table}"));
+    }
+}
+
+#[test]
+fn string_low_cardinality_codec_zstd_reading_writing() {
+    let server = ClickhouseServer::connect();
+    let table = unique_table("");
+    server.exec(&format!("DROP TABLE IF EXISTS {table}"));
+    if !server.try_exec(&format!(
+        "CREATE TABLE {table} (value LowCardinality(String) CODEC(ZSTD)) ENGINE=Memory"
+    )) {
+        return;
+    }
+    // CODEC does not change RowBinary types for LowCardinality(String).
+    let schema = Schema::from_type_strings(&[("value", "LowCardinality(String)")]).unwrap();
 
     for format in FORMATS {
         server.exec(&format!("INSERT INTO {table} VALUES ('alpha')"));

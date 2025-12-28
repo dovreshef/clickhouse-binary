@@ -106,6 +106,40 @@ fn fixed_string_multi_row_writing() {
 }
 
 #[test]
+fn fixed_string_codec_zstd_reading_writing() {
+    let server = ClickhouseServer::connect();
+    let table = unique_table("");
+    server.exec(&format!("DROP TABLE IF EXISTS {table}"));
+    if !server.try_exec(&format!(
+        "CREATE TABLE {table} (value FixedString(3) CODEC(ZSTD)) ENGINE=Memory"
+    )) {
+        return;
+    }
+    // CODEC is storage-only; RowBinary headers keep `FixedString(3)`.
+    let schema = Schema::from_type_strings(&[("value", "FixedString(3)")]).unwrap();
+
+    for format in FORMATS {
+        server.exec(&format!("INSERT INTO {table} VALUES ('abc')"));
+        let payload = server.fetch_rowbinary(&format!("SELECT value FROM {table}"), format);
+        let decoded = decode_rows(&payload, format, &schema);
+        assert_eq!(decoded, vec![vec![Value::FixedString(b"abc".to_vec())]]);
+        server.exec(&format!("TRUNCATE TABLE {table}"));
+
+        let insert_sql = format!("INSERT INTO {table} FORMAT {format}");
+        server.insert_rowbinary(
+            &insert_sql,
+            format,
+            &schema,
+            &[vec![Value::FixedString(b"abc".to_vec())]],
+        );
+        let payload = server.fetch_rowbinary(&format!("SELECT value FROM {table}"), format);
+        let decoded = decode_rows(&payload, format, &schema);
+        assert_eq!(decoded, vec![vec![Value::FixedString(b"abc".to_vec())]]);
+        server.exec(&format!("TRUNCATE TABLE {table}"));
+    }
+}
+
+#[test]
 fn fixed_string_nullable_single_row_reading() {
     let server = ClickhouseServer::connect();
     let table = unique_table("");

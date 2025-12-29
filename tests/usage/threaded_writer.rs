@@ -1,6 +1,8 @@
 use std::{fs::File, io::Write, thread};
 
-use clickhouse_rowbinary::{Row, RowBinaryFormat, RowBinaryReader, RowBinaryWriter, Schema, Value};
+use clickhouse_rowbinary::{
+    Row, RowBinaryFormat, RowBinaryValueReader, RowBinaryValueWriter, Schema, Value,
+};
 use zstd::stream::{Decoder, Encoder};
 
 use crate::common::unique_table;
@@ -24,14 +26,18 @@ fn combine_threaded_rowbinary_chunks_into_one_file() {
     // Each worker encodes rows as plain RowBinary (no header).
     let schema_a = schema.clone();
     let handle_a = thread::spawn(move || {
-        let mut writer = RowBinaryWriter::new(Vec::new(), RowBinaryFormat::RowBinary, schema_a);
+        let mut writer =
+            RowBinaryValueWriter::new(Vec::new(), RowBinaryFormat::RowBinary, schema_a);
+        writer.write_header().unwrap();
         writer.write_rows(&rows_a).unwrap();
         writer.into_inner()
     });
 
     let schema_b = schema.clone();
     let handle_b = thread::spawn(move || {
-        let mut writer = RowBinaryWriter::new(Vec::new(), RowBinaryFormat::RowBinary, schema_b);
+        let mut writer =
+            RowBinaryValueWriter::new(Vec::new(), RowBinaryFormat::RowBinary, schema_b);
+        writer.write_header().unwrap();
         writer.write_rows(&rows_b).unwrap();
         writer.into_inner()
     });
@@ -45,7 +51,7 @@ fn combine_threaded_rowbinary_chunks_into_one_file() {
     let file = File::create(&file_path).unwrap();
     let mut encoder = Encoder::new(file, 0).unwrap();
 
-    let mut header_writer = RowBinaryWriter::new(
+    let mut header_writer = RowBinaryValueWriter::new(
         Vec::new(),
         RowBinaryFormat::RowBinaryWithNamesAndTypes,
         schema.clone(),
@@ -59,11 +65,12 @@ fn combine_threaded_rowbinary_chunks_into_one_file() {
     // Read the merged file back and verify row order.
     let file = File::open(&file_path).unwrap();
     let zstd_decoder = Decoder::new(file).unwrap();
-    let mut reader = RowBinaryReader::with_schema(
+    let mut reader = RowBinaryValueReader::with_schema(
         zstd_decoder,
         RowBinaryFormat::RowBinaryWithNamesAndTypes,
         schema,
-    );
+    )
+    .unwrap();
     let mut rows = Vec::new();
     while let Some(row) = reader.read_row().unwrap() {
         rows.push(row);

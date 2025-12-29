@@ -2,7 +2,9 @@
 
 use std::io::Read;
 
-use clickhouse_rowbinary::{Row, RowBinaryFormat, RowBinaryReader, RowBinaryWriter, Schema, Value};
+use clickhouse_rowbinary::{
+    Row, RowBinaryFormat, RowBinaryValueReader, RowBinaryValueWriter, Schema, Value,
+};
 use rand::{Rng, distr::Alphanumeric, rng};
 use serde_json::Value as JsonValue;
 use ureq::{Agent, Body, Error as UreqError, config::Config, http::Response as HttpResponse};
@@ -70,7 +72,8 @@ impl ClickhouseServer {
         schema: &Schema,
         rows: &[Row],
     ) {
-        let mut writer = RowBinaryWriter::new(Vec::new(), format, schema.clone());
+        let mut writer = RowBinaryValueWriter::new(Vec::new(), format, schema.clone());
+        writer.write_header().unwrap();
         writer.write_rows(rows).unwrap();
         let payload = writer.into_inner();
         self.insert_payload(sql, &payload);
@@ -168,7 +171,7 @@ fn response_bytes(mut response: Response) -> Vec<u8> {
 
 /// Decodes all rows from a `RowBinary` payload.
 pub fn decode_rows(payload: &[u8], format: RowBinaryFormat, schema: &Schema) -> Vec<Row> {
-    let mut reader = RowBinaryReader::with_schema(payload, format, schema.clone());
+    let mut reader = RowBinaryValueReader::with_schema(payload, format, schema.clone()).unwrap();
     let mut rows = Vec::new();
     while let Some(row) = reader.read_row().unwrap() {
         rows.push(row);
@@ -258,6 +261,15 @@ pub fn unique_table(prefix: &str) -> String {
         .map(char::from)
         .collect();
     format!("{base}_{suffix}")
+}
+
+/// Encodes a single row into `RowBinary` bytes (without header).
+pub fn row_bytes(schema: &Schema, row: &[Value]) -> Vec<u8> {
+    let mut writer =
+        RowBinaryValueWriter::new(Vec::new(), RowBinaryFormat::RowBinary, schema.clone());
+    writer.write_header().expect("header write failed");
+    writer.write_row(row).expect("row encoding failed");
+    writer.into_inner()
 }
 
 fn current_test_identifier() -> Option<String> {

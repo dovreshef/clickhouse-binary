@@ -2,55 +2,79 @@
 
 This file shows end-to-end patterns for streaming RowBinary payloads.
 
-## Read a ZSTD-compressed RowBinaryWithNamesAndTypes file and post in batches
+For convenience, `RowBinaryFileReader` and `RowBinaryFileWriter` are type
+aliases for buffered file-backed readers/writers (`BufReader<File>` and
+`BufWriter<File>`). `RowBinaryValueWriter::new_buffered` wraps any writer in
+`BufWriter` when you want buffering for small row payloads.
 
-The `RowBinaryWithNamesAndTypes` header is required for each INSERT. For best
-performance, stream rows directly into the batch writer and only rebuild the
-payload when you hit the batch size.
+## Write a seekable Zstd RowBinaryWithNamesAndTypes file
 
 ```rust
 use std::fs::File;
-use std::io::{BufReader, BufWriter, Read, Write};
+use std::io::BufWriter;
 
 use clickhouse_rowbinary::{
-    RowBinaryFormat, RowBinaryReader, RowBinaryWriter, Schema, Value,
+    RowBinaryFormat, RowBinaryWriter, RowBinaryValueWriter, Schema, Value,
 };
-use zstd::stream::{Decoder, Encoder};
 
-// 1) Produce a compressed file (header written once at the start).
 let schema = Schema::from_type_strings(&[("id", "UInt8"), ("name", "String")])?;
 let rows = vec![
     vec![Value::UInt8(1), Value::String(b"alpha".to_vec())],
     vec![Value::UInt8(2), Value::String(b"beta".to_vec())],
 ];
+
 let file = File::create("data.rowbinary.zst")?;
-let file = BufWriter::new(file);
-let mut encoder = Encoder::new(file, 0)?;
-let mut writer = RowBinaryWriter::new(
-    Vec::new(),
-    RowBinaryFormat::RowBinaryWithNamesAndTypes,
-    schema.clone(),
-);
-writer.write_rows(&rows)?;
-encoder.write_all(&writer.into_inner())?;
-encoder.finish()?;
+let mut writer =
+    RowBinaryWriter::new(BufWriter::new(file), RowBinaryFormat::RowBinaryWithNamesAndTypes)?;
+writer.write_header(&schema)?;
+for row in &rows {
+    let mut row_writer =
+        RowBinaryValueWriter::new(Vec::new(), RowBinaryFormat::RowBinary, schema.clone());
+    row_writer.write_header()?;
+    row_writer.write_row(row)?;
+    writer.write_row_bytes(&row_writer.into_inner())?;
+}
+writer.finish()?;
+```
 
-// 2) Read and post batches to ClickHouse (stream rows; no Vec<Row> buffering).
+## Read a seekable Zstd RowBinaryWithNamesAndTypes file and post in batches
+
+The `RowBinaryWithNamesAndTypes` header is required for each INSERT. For best
+performance, stream row bytes directly into the batch writer and only rebuild
+the payload when you hit the batch size.
+
+```rust
+use std::fs::File;
+use std::io::BufReader;
+
+use clickhouse_rowbinary::{
+    RowBinaryFormat, RowBinaryReader, RowBinaryValueWriter, Schema,
+};
+
+let schema = Schema::from_type_strings(&[("id", "UInt8"), ("name", "String")])?;
 let file = File::open("data.rowbinary.zst")?;
-let file = BufReader::new(file);
-let decoder = Decoder::new(file)?;
-let mut reader = RowBinaryReader::new(decoder, RowBinaryFormat::RowBinaryWithNamesAndTypes);
-reader.read_header()?;
+let mut reader = RowBinaryReader::new(
+    BufReader::new(file),
+    RowBinaryFormat::RowBinaryWithNamesAndTypes,
+    None,
+)?;
+// The constructor parses the header and initializes the schema.
+// For large files, consider RowBinaryReader::new_with_stride(..., 1024)
+// to keep the in-memory row index sparse.
 
-let mut out = RowBinaryWriter::new(
+let mut out = RowBinaryValueWriter::new(
     Vec::new(),
     RowBinaryFormat::RowBinaryWithNamesAndTypes,
     schema.clone(),
 );
-let mut row_buf = Vec::new();
+out.write_header()?;
+
 let mut count = 0usize;
-while reader.read_row_into(&mut row_buf)? {
-    out.write_row(&row_buf)?;
+loop {
+    let Some(row) = reader.current_row()? else {
+        break;
+    };
+    out.write_row_bytes(row)?;
     count += 1;
     if count == 100_000 {
         let mut payload = out.take_inner();
@@ -59,16 +83,22 @@ while reader.read_row_into(&mut row_buf)? {
         out.reset(payload);
         count = 0;
     }
+    if reader.seek_relative(1).is_err() {
+        break;
+    }
 }
 
 if count > 0 {
     let payload = out.into_inner();
     // POST: INSERT INTO table FORMAT RowBinaryWithNamesAndTypes
 }
+
+// Seek to a specific row if you need to retry from a prior position.
+reader.seek_row(50_000)?;
 ```
 
 For tighter control over allocations, keep a reusable `Vec<u8>` per batch,
-`clear()` it after sending, and pass it into each new `RowBinaryWriter`.
+`clear()` it after sending, and pass it into each new `RowBinaryValueWriter`.
 If your HTTP client supports streaming request bodies, you can write directly
 into the request stream instead of buffering the entire batch.
 
@@ -83,10 +113,11 @@ encoded as `Array(Tuple(...))`, so the decoded `TypeDesc` will be that array
 form rather than `Nested`.
 
 ```rust
-use clickhouse_rowbinary::{RowBinaryFormat, RowBinaryWriter, Schema, TypeDesc, Value};
+use clickhouse_rowbinary::{RowBinaryFormat, RowBinaryValueWriter, Schema, TypeDesc, Value};
 
 let schema = Schema::from_type_strings(&[("value", "Dynamic")])?;
-let mut writer = RowBinaryWriter::new(Vec::new(), RowBinaryFormat::RowBinary, schema);
+let mut writer = RowBinaryValueWriter::new(Vec::new(), RowBinaryFormat::RowBinary, schema);
+writer.write_header()?;
 writer.write_rows(&[
     vec![Value::Dynamic {
         ty: Box::new(TypeDesc::UInt8),
@@ -111,10 +142,11 @@ will emit `n.a`, `n.b` payloads in the expected order. This conversion buffers
 the nested values to transpose rows into per-field arrays.
 
 ```rust
-use clickhouse_rowbinary::{RowBinaryFormat, RowBinaryWriter, Schema, Value};
+use clickhouse_rowbinary::{RowBinaryFormat, RowBinaryValueWriter, Schema, Value};
 
 let schema = Schema::from_type_strings(&[("n", "Nested(a UInt8, b String)")])?;
-let mut writer = RowBinaryWriter::new(Vec::new(), RowBinaryFormat::RowBinary, schema);
+let mut writer = RowBinaryValueWriter::new(Vec::new(), RowBinaryFormat::RowBinary, schema);
+writer.write_header()?;
 writer.write_row(&[Value::Array(vec![
     Value::Tuple(vec![Value::UInt8(7), Value::String(b"alpha".to_vec())]),
     Value::Tuple(vec![Value::UInt8(9), Value::String(b"beta".to_vec())]),
@@ -133,14 +165,15 @@ use std::fs::File;
 use std::io::Write;
 use std::thread;
 
-use clickhouse_rowbinary::{RowBinaryFormat, RowBinaryWriter, Schema, Value};
+use clickhouse_rowbinary::{RowBinaryFormat, RowBinaryValueWriter, Schema, Value};
 use zstd::stream::Encoder;
 
 let schema = Schema::from_type_strings(&[("id", "UInt8"), ("name", "String")])?;
 
 let handle = |rows: Vec<Vec<Value>>| {
     thread::spawn(move || {
-        let mut writer = RowBinaryWriter::new(Vec::new(), RowBinaryFormat::RowBinary, schema);
+        let mut writer = RowBinaryValueWriter::new(Vec::new(), RowBinaryFormat::RowBinary, schema);
+        writer.write_header()?;
         writer.write_rows(&rows)?;
         Ok::<_, clickhouse_rowbinary::Error>(writer.into_inner())
     })
@@ -155,7 +188,7 @@ let file = File::create("combined.rowbinary.zst")?;
 let mut encoder = Encoder::new(file, 0)?;
 
 // Write one header, then append raw row bytes.
-let mut header_writer = RowBinaryWriter::new(
+let mut header_writer = RowBinaryValueWriter::new(
     Vec::new(),
     RowBinaryFormat::RowBinaryWithNamesAndTypes,
     schema,

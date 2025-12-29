@@ -9,19 +9,20 @@ validation against a live ClickHouse server.
 
 - Read/write `RowBinary`, `RowBinaryWithNames`, `RowBinaryWithNamesAndTypes`.
 - Streaming row APIs for incremental reads/writes.
+- Buffered row view with boundary tracking for retryable batching.
 - Strict schema validation with structured errors (no panics in library code).
 - Integration tests for read/write across all formats, single/multi row cases.
 
 ## Usage
 
 ```rust
-use clickhouse_rowbinary::{RowBinaryFormat, RowBinaryWriter, Schema, Value};
+use clickhouse_rowbinary::{RowBinaryFormat, RowBinaryValueWriter, Schema, Value};
 
 let schema = Schema::from_type_strings(&[
     ("id", "UInt32"),
     ("name", "String"),
 ])?;
-let mut writer = RowBinaryWriter::new(Vec::new(), RowBinaryFormat::RowBinary, schema);
+let mut writer = RowBinaryValueWriter::new(Vec::new(), RowBinaryFormat::RowBinary, schema);
 writer.write_row(&[Value::UInt32(1), Value::String(b"alpha".to_vec())])?;
 let payload = writer.into_inner();
 ```
@@ -29,8 +30,8 @@ let payload = writer.into_inner();
 For `RowBinaryWithNames` and `RowBinaryWithNamesAndTypes`, the header is written
 automatically from the schema.
 
-See `USAGE.md` for end-to-end streaming examples (compressed files, batching,
-and multi-threaded producers).
+See `USAGE.md` for end-to-end streaming examples (seekable Zstd files, batching,
+row seeking, and multi-threaded producers).
 
 ## Supported Types
 

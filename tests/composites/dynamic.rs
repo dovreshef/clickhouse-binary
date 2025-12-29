@@ -1,5 +1,5 @@
 use clickhouse_rowbinary::{
-    Error, RowBinaryFormat, RowBinaryReader, Schema, TypeDesc, Value, types::TupleItem,
+    Error, RowBinaryFormat, RowBinaryValueReader, Schema, TypeDesc, Value, types::TupleItem,
 };
 use serde_json::json;
 
@@ -173,7 +173,9 @@ fn dynamic_multi_row_writing() {
 fn dynamic_rejects_unsupported_type_encoding() {
     let schema = Schema::from_type_strings(&[("value", "Dynamic")]).unwrap();
     let payload = [0x2C_u8];
-    let mut reader = RowBinaryReader::with_schema(&payload[..], RowBinaryFormat::RowBinary, schema);
+    let mut reader =
+        RowBinaryValueReader::with_schema(&payload[..], RowBinaryFormat::RowBinary, schema)
+            .unwrap();
     let err = reader.read_row().unwrap_err();
     assert!(matches!(err, Error::UnsupportedType(_)));
 }

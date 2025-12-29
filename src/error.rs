@@ -9,6 +9,9 @@ pub enum Error {
     /// IO error bubbling from [`std::io`].
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
+    /// Zstd seekable error bubbling from `zeekstd`.
+    #[error("zstd seekable error: {0}")]
+    Zstd(#[from] zeekstd::Error),
     /// Returned when a value is outside of the supported domain of a type.
     #[error("invalid value: {0}")]
     InvalidValue(&'static str),
@@ -46,6 +49,9 @@ mod tests {
         // actionable error when formatting via Display.
         let io_err = Error::Io(std::io::Error::other("boom"));
         assert!(format!("{io_err}").contains("io error"));
+
+        let zstd_err = Error::Zstd(zeekstd::Error::from(std::io::Error::other("zstd")));
+        assert!(format!("{zstd_err}").contains("zstd seekable error"));
 
         let invalid = Error::InvalidValue("oops");
         assert!(format!("{invalid}").contains("oops"));

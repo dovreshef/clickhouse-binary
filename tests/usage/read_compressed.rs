@@ -1,6 +1,8 @@
 use std::{fs::File, io::Write};
 
-use clickhouse_rowbinary::{Row, RowBinaryFormat, RowBinaryReader, RowBinaryWriter, Schema, Value};
+use clickhouse_rowbinary::{
+    Row, RowBinaryFormat, RowBinaryValueReader, RowBinaryValueWriter, Schema, Value,
+};
 use serde_json::json;
 use zstd::stream::{Decoder, Encoder};
 
@@ -28,11 +30,12 @@ fn read_compressed_rowbinary_with_names_and_types_in_batches() {
     let file_path = std::env::temp_dir().join(format!("rowbinary_{table}.zst"));
     let file = File::create(&file_path).unwrap();
     let mut encoder = Encoder::new(file, 0).unwrap();
-    let mut writer = RowBinaryWriter::new(
+    let mut writer = RowBinaryValueWriter::new(
         Vec::new(),
         RowBinaryFormat::RowBinaryWithNamesAndTypes,
         schema.clone(),
     );
+    writer.write_header().unwrap();
     writer.write_rows(&rows).unwrap();
     encoder.write_all(&writer.into_inner()).unwrap();
     encoder.finish().unwrap();
@@ -41,14 +44,15 @@ fn read_compressed_rowbinary_with_names_and_types_in_batches() {
     // its own header for RowBinaryWithNamesAndTypes.
     let file = File::open(&file_path).unwrap();
     let decoder = Decoder::new(file).unwrap();
-    let mut reader = RowBinaryReader::new(decoder, RowBinaryFormat::RowBinaryWithNamesAndTypes);
-    reader.read_header().unwrap();
+    let mut reader =
+        RowBinaryValueReader::new(decoder, RowBinaryFormat::RowBinaryWithNamesAndTypes).unwrap();
 
-    let mut out = RowBinaryWriter::new(
+    let mut out = RowBinaryValueWriter::new(
         Vec::new(),
         RowBinaryFormat::RowBinaryWithNamesAndTypes,
         schema.clone(),
     );
+    out.write_header().unwrap();
     let mut count = 0usize;
     let mut sent = 0usize;
     while let Some(row) = reader.read_row().unwrap() {
@@ -62,11 +66,12 @@ fn read_compressed_rowbinary_with_names_and_types_in_batches() {
             );
             server.insert_payload(&insert_sql, &payload);
             sent += count;
-            out = RowBinaryWriter::new(
+            out = RowBinaryValueWriter::new(
                 Vec::new(),
                 RowBinaryFormat::RowBinaryWithNamesAndTypes,
                 schema.clone(),
             );
+            out.write_header().unwrap();
             count = 0;
         }
     }

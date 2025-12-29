@@ -8,6 +8,9 @@ pub mod types;
 pub mod value;
 
 pub use error::{Error, Result};
-pub use rowbinary::{Field, Row, RowBinaryFormat, RowBinaryReader, RowBinaryWriter, Schema};
+pub use rowbinary::{
+    Field, Row, RowBinaryFileReader, RowBinaryFileWriter, RowBinaryFormat, RowBinaryHeader,
+    RowBinaryReader, RowBinaryValueReader, RowBinaryValueWriter, RowBinaryWriter, Schema,
+};
 pub use types::{TypeDesc, parse_type_desc};
 pub use value::Value;

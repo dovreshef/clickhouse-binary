@@ -13,8 +13,7 @@ use pyo3::{
 };
 
 use clickhouse_rowbinary::{
-    RowBinaryFormat as RustFormat, RowBinaryValueReader as RustReader, Schema as RustSchema,
-    Value,
+    RowBinaryFormat as RustFormat, RowBinaryValueReader as RustReader, Schema as RustSchema, Value,
 };
 
 use crate::{convert::StringMode, errors::to_py_err, format::Format, row::Row, schema::Schema};
@@ -74,8 +73,8 @@ impl RowBinaryReader {
         let cursor = Cursor::new(bytes);
 
         let (reader, schema_inner) = if let Some(s) = schema {
-            let reader =
-                RustReader::with_schema(cursor, rust_format, (*s.inner).clone()).map_err(to_py_err)?;
+            let reader = RustReader::with_schema(cursor, rust_format, (*s.inner).clone())
+                .map_err(to_py_err)?;
             (reader, s.inner)
         } else {
             let reader = RustReader::new(cursor, rust_format).map_err(to_py_err)?;
@@ -243,7 +242,8 @@ impl RowBinaryReader {
     }
 }
 
-/// Helper function to read all values from a reader state (pure Rust, no GIL needed).
+/// Helper function to read all values from a reader state (pure Rust, no GIL
+/// needed).
 fn read_all_values(
     mut state: ReaderState,
 ) -> Result<(Vec<Vec<Value>>, ReaderState), clickhouse_rowbinary::Error> {

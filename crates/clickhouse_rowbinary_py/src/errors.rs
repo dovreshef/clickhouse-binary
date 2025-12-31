@@ -4,7 +4,8 @@
 //!
 //! - `ClickHouseRowBinaryError` - Base exception for all library errors
 //!   - `SchemaError` - Invalid type string or schema definition
-//!   - `ValidationError` - Data doesn't match schema (wrong type, missing column)
+//!   - `ValidationError` - Data doesn't match schema (wrong type, missing
+//!     column)
 //!   - `EncodingError` - Failed to encode value to RowBinary
 //!   - `DecodingError` - Failed to decode RowBinary data (corrupted, truncated)
 

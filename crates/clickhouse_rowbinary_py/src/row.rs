@@ -51,12 +51,7 @@ impl Row {
 
             let idx = idx as usize;
             let fields = self.schema.fields();
-            value_to_python(
-                py,
-                &self.values[idx],
-                &fields[idx].ty,
-                self.string_mode,
-            )
+            value_to_python(py, &self.values[idx], &fields[idx].ty, self.string_mode)
         } else if let Ok(name) = key.extract::<&str>() {
             self.get_by_name(py, name)?
                 .ok_or_else(|| pyo3::exceptions::PyKeyError::new_err(name.to_string()))
@@ -177,7 +172,11 @@ impl Row {
     /// Returns:
     ///     list[str]: The column names.
     fn keys(&self) -> Vec<&str> {
-        self.schema.fields().iter().map(|f| f.name.as_str()).collect()
+        self.schema
+            .fields()
+            .iter()
+            .map(|f| f.name.as_str())
+            .collect()
     }
 
     /// Returns the values.

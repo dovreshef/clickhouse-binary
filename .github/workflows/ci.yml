@@ -22,7 +22,7 @@ jobs:
       - name: Check formatting
         run: cargo +nightly fmt --all -- --check
 
-  # Rust checks (uses stable from rust-toolchain.toml)
+  # Rust checks (clippy + unit tests)
   rust:
     runs-on: ubuntu-latest
     steps:
@@ -31,10 +31,49 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
-      - name: Clippy
-        run: cargo clippy --all-targets -- -D warnings
-      - name: Run tests
+      - name: Clippy (core library)
+        run: cargo clippy -p clickhouse_rowbinary --all-targets -- -D warnings
+      - name: Clippy (Python bindings)
+        run: cargo clippy -p clickhouse_rowbinary_py --all-targets -- -D warnings
+      - name: Run unit tests
         run: cargo test --lib
+
+  # Integration tests with ClickHouse
+  integration:
+    runs-on: ubuntu-latest
+    services:
+      clickhouse:
+        image: clickhouse/clickhouse-server:25.10
+        ports:
+          - 8123:8123
+          - 9000:9000
+        env:
+          CLICKHOUSE_USER: default
+          CLICKHOUSE_PASSWORD: test123
+          CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+        options: >-
+          --health-cmd "wget --no-verbose --tries=1 --spider http://localhost:8123/ping || exit 1"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Wait for ClickHouse
+        run: |
+          for i in {1..30}; do
+            if curl -s "http://default:test123@localhost:8123/ping" > /dev/null; then
+              echo "ClickHouse is ready"
+              break
+            fi
+            echo "Waiting for ClickHouse... ($i)"
+            sleep 2
+          done
+      - name: Run integration tests
+        env:
+          CLICKHOUSE_DSN: "http://default:test123@localhost:8123"
+        run: cargo test -p clickhouse_rowbinary --test integration -- --test-threads 4
 
   # Python tests across versions
   python:
@@ -58,12 +97,17 @@ jobs:
         run: uv sync --dev
       - name: Build extension
         run: uv run maturin develop
+      - name: Run Python linting (ruff)
+        run: uv run ruff check python/ tests/python/
+        if: matrix.python-version == '3.12' && matrix.os == 'ubuntu-latest'
+      - name: Run Python format check (ruff)
+        run: uv run ruff format --check python/ tests/python/
+        if: matrix.python-version == '3.12' && matrix.os == 'ubuntu-latest'
+      - name: Run type check (pyright)
+        run: uv run pyright python/clickhouse_rowbinary/
+        if: matrix.python-version == '3.12' && matrix.os == 'ubuntu-latest'
       - name: Run tests
         run: uv run pytest tests/python -v
-      - name: Type check
-        run: uv run pyright python/clickhouse_rowbinary/
-        # Only run type check on one version to save time
-        if: matrix.python-version == '3.12' && matrix.os == 'ubuntu-latest'
 
   # Verify wheel builds work on all platforms
   build-wheels:

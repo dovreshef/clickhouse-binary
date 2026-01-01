@@ -1,6 +1,6 @@
 [project]
 name = "clickhouse-rowbinary"
-version = "0.2.0"
+version = "0.3.0"
 description = "Fast ClickHouse RowBinary format encoder/decoder"
 readme = "python/README.md"
 license = { text = "MIT OR Apache-2.0" }

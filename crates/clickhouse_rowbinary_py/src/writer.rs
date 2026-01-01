@@ -100,6 +100,22 @@ impl RowBinaryWriter {
         Ok(())
     }
 
+    /// Writes pre-encoded row bytes directly.
+    ///
+    /// This is useful for high-performance batching where rows are already
+    /// encoded (e.g., from SeekableReader.current_row_bytes()).
+    ///
+    /// Args:
+    ///     data: The raw RowBinary-encoded row bytes.
+    ///
+    /// Raises:
+    ///     EncodingError: If writing fails.
+    fn write_row_bytes(&mut self, data: &[u8]) -> PyResult<()> {
+        self.inner.write_row_bytes(data).map_err(to_py_err)?;
+        self.rows_written += 1;
+        Ok(())
+    }
+
     /// Returns the number of rows written.
     #[getter]
     fn rows_written(&self) -> usize {

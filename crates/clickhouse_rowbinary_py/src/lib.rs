@@ -11,6 +11,8 @@ mod format;
 mod reader;
 mod row;
 mod schema;
+mod seekable_reader;
+mod seekable_writer;
 mod writer;
 
 /// Python module exposing RowBinary functionality.
@@ -26,11 +28,17 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // Row
     m.add_class::<row::Row>()?;
 
-    // Writer
+    // Writer (plain bytes)
     m.add_class::<writer::RowBinaryWriter>()?;
 
-    // Reader
+    // Reader (plain bytes)
     m.add_class::<reader::RowBinaryReader>()?;
+
+    // Seekable Writer (Zstd compressed)
+    m.add_class::<seekable_writer::SeekableWriter>()?;
+
+    // Seekable Reader (Zstd compressed)
+    m.add_class::<seekable_reader::SeekableReader>()?;
 
     // Exceptions
     m.add(

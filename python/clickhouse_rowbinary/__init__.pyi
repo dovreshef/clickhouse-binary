@@ -461,6 +461,29 @@ class RowBinaryWriter:
         """
         ...
 
+    def write_row_bytes(self, data: bytes) -> None:
+        """Write pre-encoded row bytes directly.
+
+        This is useful for high-performance batching where rows are already
+        encoded (e.g., from SeekableReader.current_row_bytes()).
+
+        Args:
+            data: The raw RowBinary-encoded row bytes.
+
+        Raises:
+            EncodingError: If writing fails.
+
+        Example:
+            >>> # Pass through rows from a compressed file without decoding
+            >>> with SeekableReader.open("input.zst", schema=schema) as reader:
+            ...     writer = RowBinaryWriter(schema)
+            ...     writer.write_header()
+            ...     while (row_bytes := reader.current_row_bytes()) is not None:
+            ...         writer.write_row_bytes(row_bytes)
+            ...         reader.seek_relative(1)
+        """
+        ...
+
     @property
     def rows_written(self) -> int:
         """The number of rows written."""
@@ -618,4 +641,312 @@ class RowBinaryReader:
         """
         ...
 
+    def __repr__(self) -> str: ...
+
+# Seekable Writer class
+
+class SeekableWriter:
+    """A writer for creating Zstd-compressed RowBinary files with seek tables.
+
+    This writer produces seekable Zstd files that can be efficiently read
+    with random access using `SeekableReader`.
+
+    Example:
+        >>> schema = Schema.from_clickhouse([("id", "UInt64"), ("name", "String")])
+        >>> with SeekableWriter.create("data.rowbinary.zst", schema) as writer:
+        ...     writer.write_header()
+        ...     writer.write_row({"id": 1, "name": b"Alice"})
+        ...     writer.write_row({"id": 2, "name": b"Bob"})
+        ... # finish() called automatically
+    """
+
+    @staticmethod
+    def create(
+        path: str | PathLike[str],
+        schema: Schema,
+        format: Format = Format.RowBinaryWithNamesAndTypes,
+    ) -> SeekableWriter:
+        """Create a new Zstd-compressed RowBinary file.
+
+        Args:
+            path: Path to the output file.
+            schema: The schema defining the columns to write.
+            format: The RowBinary format variant (default: RowBinaryWithNamesAndTypes).
+
+        Returns:
+            A new writer instance.
+
+        Raises:
+            IOError: If the file cannot be created.
+            EncodingError: If the writer cannot be initialized.
+        """
+        ...
+
+    def write_header(self) -> None:
+        """Write the format header (if required by the format).
+
+        Call this before writing any rows. For RowBinaryWithNames and
+        RowBinaryWithNamesAndTypes formats, this writes the column
+        names and/or types.
+
+        Raises:
+            RuntimeError: If the writer has already been finished.
+            EncodingError: If writing the header fails.
+        """
+        ...
+
+    def write_row(self, row: dict[str, Any] | list[Any] | tuple[Any, ...]) -> None:
+        """Write a single row.
+
+        Args:
+            row: The row data as a dict, list, or tuple.
+                - dict: Maps column names to values
+                - list/tuple: Values in schema column order
+
+        Raises:
+            RuntimeError: If the writer has already been finished.
+            ValidationError: If the row data doesn't match the schema.
+            EncodingError: If encoding fails.
+        """
+        ...
+
+    def write_rows(
+        self, rows: Iterable[dict[str, Any] | list[Any] | tuple[Any, ...]]
+    ) -> None:
+        """Write multiple rows.
+
+        Args:
+            rows: An iterable of row data (dicts, lists, or tuples).
+
+        Raises:
+            RuntimeError: If the writer has already been finished.
+            ValidationError: If any row data doesn't match the schema.
+            EncodingError: If encoding fails.
+        """
+        ...
+
+    def write_row_bytes(self, data: bytes) -> None:
+        """Write pre-encoded row bytes directly.
+
+        This is useful for high-performance batching where rows are already
+        encoded (e.g., from SeekableReader.current_row_bytes()).
+
+        Args:
+            data: The raw RowBinary-encoded row bytes.
+
+        Raises:
+            RuntimeError: If the writer has already been finished.
+            EncodingError: If writing fails.
+        """
+        ...
+
+    def write_rows_bytes(self, data_list: list[bytes]) -> None:
+        """Write multiple pre-encoded row bytes.
+
+        Args:
+            data_list: A list of raw RowBinary-encoded row bytes.
+
+        Raises:
+            RuntimeError: If the writer has already been finished.
+            EncodingError: If writing fails.
+        """
+        ...
+
+    @property
+    def rows_written(self) -> int:
+        """The number of rows written."""
+        ...
+
+    @property
+    def compressed_bytes(self) -> int:
+        """The number of compressed bytes written so far.
+
+        Note: Call flush() first for an accurate count.
+        """
+        ...
+
+    def flush(self) -> None:
+        """Flush the underlying writer.
+
+        Raises:
+            RuntimeError: If the writer has already been finished.
+            EncodingError: If flushing fails.
+        """
+        ...
+
+    def finish(self) -> int:
+        """Finalize the file and write the seek table.
+
+        This MUST be called when done writing. The context manager
+        calls this automatically.
+
+        Returns:
+            The total number of compressed bytes written.
+
+        Raises:
+            RuntimeError: If the writer has already been finished.
+            EncodingError: If finalization fails.
+        """
+        ...
+
+    def __enter__(self) -> SeekableWriter: ...
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: Any,
+    ) -> bool: ...
+    def __repr__(self) -> str: ...
+
+# Seekable Reader class
+
+class SeekableReader:
+    """A reader for Zstd-compressed RowBinary files with random access.
+
+    This reader supports efficient seeking to any row in a compressed file.
+    Files must be created with `SeekableWriter` to include the seek table.
+
+    Important: `read_current()` does NOT advance the position. Use `seek_relative(1)`
+    to move to the next row after reading.
+
+    Example:
+        >>> schema = Schema.from_clickhouse([("id", "UInt64"), ("name", "String")])
+        >>> with SeekableReader.open("data.rowbinary.zst", schema=schema) as reader:
+        ...     # Random access
+        ...     reader.seek(1000)
+        ...     row = reader.read_current()
+        ...
+        ...     # Sequential iteration
+        ...     reader.seek(0)
+        ...     for row in reader:
+        ...         print(row["id"])
+    """
+
+    @staticmethod
+    def open(
+        path: str | PathLike[str],
+        schema: Schema | None = None,
+        format: Format = Format.RowBinaryWithNamesAndTypes,
+        stride: int = 1024,
+        string_mode: Literal["bytes", "str"] = "bytes",
+    ) -> SeekableReader:
+        """Open a Zstd-compressed RowBinary file.
+
+        Args:
+            path: Path to the compressed file.
+            schema: The schema (required for RowBinary format, optional for
+                RowBinaryWithNamesAndTypes which includes the schema in the header).
+            format: The RowBinary format variant (default: RowBinaryWithNamesAndTypes).
+            stride: Row index stride for seeking (default: 1024). Smaller values
+                use more memory but make backward seeks faster.
+            string_mode: How to handle string fields: "bytes" (default) or "str".
+
+        Returns:
+            A new reader instance.
+
+        Raises:
+            IOError: If the file cannot be opened.
+            DecodingError: If the file is not valid seekable Zstd or header is invalid.
+        """
+        ...
+
+    @property
+    def schema(self) -> Schema:
+        """The schema used by this reader."""
+        ...
+
+    @property
+    def current_index(self) -> int:
+        """The current row index."""
+        ...
+
+    def seek(self, index: int) -> None:
+        """Seek to an absolute row index.
+
+        Args:
+            index: The row index to seek to (0-based).
+
+        Raises:
+            DecodingError: If the index is out of range.
+        """
+        ...
+
+    def seek_relative(self, delta: int) -> None:
+        """Seek relative to the current position.
+
+        Args:
+            delta: The number of rows to move (positive = forward, negative = backward).
+
+        Raises:
+            DecodingError: If the resulting index is out of range.
+        """
+        ...
+
+    def seek_to_start(self) -> None:
+        """Seek to the first row."""
+        ...
+
+    def current_row_bytes(self) -> bytes | None:
+        """Return the raw bytes of the current row without decoding.
+
+        This is useful for high-performance batching where you want to
+        pass row bytes directly to another writer without decoding.
+
+        Note: This does NOT advance the position.
+
+        Returns:
+            The raw row bytes, or None if at end of file.
+        """
+        ...
+
+    def read_current(self) -> Row | None:
+        """Read and decode the current row.
+
+        Note: This does NOT advance the position. Use `seek_relative(1)` to
+        move to the next row.
+
+        Returns:
+            The decoded row, or None if at end of file.
+
+        Raises:
+            DecodingError: If decoding fails.
+        """
+        ...
+
+    def read_rows(self, count: int) -> list[Row]:
+        """Read the next n rows as decoded Row objects.
+
+        This is a convenience method that seeks forward after each read.
+
+        Args:
+            count: Maximum number of rows to read.
+
+        Returns:
+            The decoded rows (may be fewer than count if EOF reached).
+
+        Raises:
+            DecodingError: If decoding fails.
+        """
+        ...
+
+    def __iter__(self) -> Iterator[Row]:
+        """Iterate over rows."""
+        ...
+
+    def __next__(self) -> Row:
+        """Return the next row and advance position.
+
+        Raises:
+            StopIteration: If no more rows.
+            DecodingError: If decoding fails.
+        """
+        ...
+
+    def __enter__(self) -> SeekableReader: ...
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: Any,
+    ) -> bool: ...
     def __repr__(self) -> str: ...

@@ -119,10 +119,29 @@ Classes
 -------
 - ``Schema`` - Defines the structure of RowBinary data
 - ``Column`` - A single column definition (name + type)
-- ``RowBinaryWriter`` - Encodes rows to RowBinary format
-- ``RowBinaryReader`` - Decodes rows from RowBinary format
+- ``RowBinaryWriter`` - Encodes rows to RowBinary format (in-memory)
+- ``RowBinaryReader`` - Decodes rows from RowBinary format (in-memory)
+- ``SeekableWriter`` - Writes Zstd-compressed RowBinary files with seek tables
+- ``SeekableReader`` - Reads Zstd-compressed RowBinary files with random access
 - ``Row`` - A decoded row with dict-like access
 - ``Format`` - Enum of RowBinary format variants
+
+Compressed Files
+----------------
+For working with large datasets, use ``SeekableWriter`` and ``SeekableReader``
+to create and read Zstd-compressed files with efficient random access:
+
+    >>> from clickhouse_rowbinary import Schema, SeekableWriter, SeekableReader
+    >>>
+    >>> # Write compressed file
+    >>> with SeekableWriter.create("data.rowbinary.zst", schema) as writer:
+    ...     writer.write_header()
+    ...     writer.write_rows(rows)
+    ...
+    >>> # Read with random access
+    >>> with SeekableReader.open("data.rowbinary.zst", schema=schema) as reader:
+    ...     reader.seek(1000)  # Jump to row 1000
+    ...     row = reader.read_current()
 """
 
 from clickhouse_rowbinary._core import (
@@ -138,6 +157,9 @@ from clickhouse_rowbinary._core import (
     # Main classes
     Schema,
     SchemaError,
+    # Seekable classes for compressed files
+    SeekableReader,
+    SeekableWriter,
     ValidationError,
 )
 
@@ -149,6 +171,9 @@ __all__ = [
     "RowBinaryWriter",
     "RowBinaryReader",
     "Format",
+    # Seekable classes for compressed files
+    "SeekableWriter",
+    "SeekableReader",
     # Exceptions
     "ClickHouseRowBinaryError",
     "SchemaError",
@@ -159,7 +184,7 @@ __all__ = [
     "SUPPORTED_TYPES",
 ]
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 # Type mapping for discoverability
 SUPPORTED_TYPES: dict[str, str] = {

@@ -37,6 +37,7 @@ for row in reader:
 - **All ClickHouse types**: Integers (8-256 bit), floats, strings, dates, UUIDs, IPs, decimals, enums, and composite types
 - **Three format variants**: `RowBinary`, `RowBinaryWithNames`, `RowBinaryWithNamesAndTypes`
 - **Streaming I/O**: Process large datasets without loading everything into memory
+- **Compressed files**: Read and write Zstd-compressed files with random access via `SeekableReader` and `SeekableWriter`
 - **File support**: Read directly from files with `RowBinaryReader.from_file()`
 - **Type safety**: Full type stubs for IDE autocomplete and type checking
 - **Fast**: Rust-powered encoding/decoding with GIL release for multi-threaded workloads
@@ -208,14 +209,118 @@ response = httpx.post(
 )
 ```
 
+## Compressed Files (Zstd)
+
+For large datasets, use `SeekableWriter` and `SeekableReader` to work with Zstd-compressed files that support random access.
+
+### Writing Compressed Files
+
+```python
+from clickhouse_rowbinary import Schema, SeekableWriter
+
+schema = Schema.from_clickhouse([("id", "UInt64"), ("name", "String")])
+
+with SeekableWriter.create("data.rowbinary.zst", schema) as writer:
+    writer.write_header()
+    for i in range(1_000_000):
+        writer.write_row({"id": i, "name": f"user{i}".encode()})
+# Seek table is written automatically on context exit
+```
+
+### Reading Compressed Files with Random Access
+
+```python
+from clickhouse_rowbinary import Schema, SeekableReader
+
+schema = Schema.from_clickhouse([("id", "UInt64"), ("name", "String")])
+
+with SeekableReader.open("data.rowbinary.zst", schema=schema) as reader:
+    # Sequential iteration
+    for row in reader:
+        print(row["id"])
+
+    # Random access - seek to any row instantly
+    reader.seek(500_000)
+    row = reader.read_current()
+    print(f"Row 500k: {row['id']}")
+
+    # Batch reading
+    reader.seek(0)
+    batch = reader.read_rows(1000)
+```
+
+### High-Performance Batch Processing
+
+For maximum throughput, work with raw bytes to avoid decoding overhead:
+
+```python
+from clickhouse_rowbinary import (
+    Schema, SeekableReader, SeekableWriter, RowBinaryWriter, Format
+)
+import httpx
+
+schema = Schema.from_clickhouse([("id", "UInt64"), ("name", "String")])
+BATCH_SIZE = 100_000
+
+# Read compressed file and insert to ClickHouse in batches
+with SeekableReader.open("huge_file.rowbinary.zst", schema=schema) as reader:
+    client = httpx.Client()
+
+    while True:
+        # Create batch with header
+        batch = RowBinaryWriter(schema, format=Format.RowBinaryWithNamesAndTypes)
+        batch.write_header()
+
+        # Collect raw bytes (no decode/re-encode overhead)
+        count = 0
+        for _ in range(BATCH_SIZE):
+            row_bytes = reader.current_row_bytes()
+            if row_bytes is None:
+                break
+            batch.write_row_bytes(row_bytes)
+            count += 1
+            try:
+                reader.seek_relative(1)
+            except Exception:
+                break  # End of file
+
+        if count == 0:
+            break
+
+        # Send batch to ClickHouse
+        client.post(
+            "http://localhost:8123/",
+            params={"query": "INSERT INTO table FORMAT RowBinaryWithNamesAndTypes"},
+            content=batch.take(),
+        )
+        print(f"Inserted {count} rows")
+```
+
+### Copy Between Compressed Files
+
+```python
+# Copy rows between compressed files without decoding
+with SeekableReader.open("input.zst", schema=schema) as reader:
+    with SeekableWriter.create("output.zst", schema) as writer:
+        writer.write_header()
+        while (row_bytes := reader.current_row_bytes()) is not None:
+            writer.write_row_bytes(row_bytes)
+            try:
+                reader.seek_relative(1)
+            except Exception:
+                break
+```
+
 ## API Reference
 
 ### Classes
 
 - `Schema` - Defines column names and types
 - `Column` - Single column definition
-- `RowBinaryWriter` - Encodes rows to RowBinary format
-- `RowBinaryReader` - Decodes rows from RowBinary format
+- `RowBinaryWriter` - Encodes rows to RowBinary format (in-memory)
+- `RowBinaryReader` - Decodes rows from RowBinary format (in-memory)
+- `SeekableWriter` - Writes Zstd-compressed RowBinary files with seek tables
+- `SeekableReader` - Reads Zstd-compressed RowBinary files with random access
 - `Row` - Decoded row with dict-like access
 - `Format` - Enum of format variants
 

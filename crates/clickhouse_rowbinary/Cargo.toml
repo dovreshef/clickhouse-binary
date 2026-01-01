@@ -1,6 +1,6 @@
 [package]
 name = "clickhouse_rowbinary"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 authors = ["Dov Reshef <reshef.dov@gmail.com>"]
 license = "MIT OR Apache-2.0"
